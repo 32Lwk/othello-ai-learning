@@ -62,7 +62,7 @@ class OthelloGame:
             for c in range(BOARD_SIZE):
                 if self.board[r][c] == 0 and self.is_valid_move(r, c, player):
                     valid_moves.append((r, c))
-        return valid_moves
+        return list(valid_moves)
 
     def is_valid_move(self, row, col, player):
         """指定された位置が有効な手かどうかを判定"""
@@ -129,7 +129,35 @@ class OthelloGame:
     def switch_player(self):
         """プレイヤーを切り替え"""
         self.current_player = PLAYER_WHITE if self.current_player == PLAYER_BLACK else PLAYER_BLACK
-        self.message = f"{'黒' if self.current_player == PLAYER_BLACK else '白'}の番です。"
+        
+        # 次のプレイヤーに有効な手がない場合はパス
+        next_player = self.current_player
+        if not self.get_valid_moves(next_player):
+            # パスメッセージを設定
+            if next_player == PLAYER_BLACK:
+                self.message = "黒は置ける場所がないためパスしました。"
+            else:
+                self.message = f"AI（{'黒' if next_player == PLAYER_BLACK else '白'}）はパスしました。"
+            
+            # さらに次のプレイヤーもチェック
+            next_next_player = PLAYER_WHITE if next_player == PLAYER_BLACK else PLAYER_BLACK
+            if not self.get_valid_moves(next_next_player):
+                # 両プレイヤーとも置けない場合はゲーム終了
+                self.game_over = True
+                black_score, white_score = self.get_score()
+                if black_score > white_score:
+                    self.message = f"黒の勝ち！ (スコア: 黒{black_score} - 白{white_score})"
+                elif white_score > black_score:
+                    self.message = f"白の勝ち！ (スコア: 黒{black_score} - 白{white_score})"
+                else:
+                    self.message = f"引き分け！ (スコア: 黒{black_score} - 白{white_score})"
+            else:
+                # 次の次のプレイヤーに手がある場合は、そのプレイヤーに切り替え
+                self.current_player = next_next_player
+                self.message = f"{'黒' if self.current_player == PLAYER_BLACK else '白'}の番です。"
+        else:
+            self.message = f"{'黒' if self.current_player == PLAYER_BLACK else '白'}の番です。"
+        
         self.last_move_error = False
 
     def check_game_over(self):
@@ -205,11 +233,11 @@ class OthelloGame:
         """盤面状態を文字列キーに変換"""
         return ''.join(str(cell) for row in self.board for cell in row)
 
-    def ai_qlearning_move(self, qtable, learn=True, player=None):
+    def ai_qlearning_move(self, qtable, learn=True, player=None, ai_learn_count=0):
         """Q学習に基づくAIの手選び・Q値更新"""
         if player is None:
             player = self.current_player
-            
+        
         state_key = self.get_board_state_key()
         valid_moves = self.get_valid_moves(player)
         if not valid_moves:
@@ -218,21 +246,25 @@ class OthelloGame:
             self.message = f"AI（{'黒' if player == PLAYER_BLACK else '白'}）はパスしました。"
             return False
 
+        # --- ε-greedy探索率を減衰させる ---
+        initial_epsilon = 0.2  # 初期値
+        min_epsilon = 0.01     # 最小値
+        decay_rate = 0.995     # 減衰率
+        current_epsilon = max(min_epsilon, initial_epsilon * (decay_rate ** ai_learn_count))
+
         # ε-greedy法で行動選択
-        if random.random() < EPSILON:
+        if random.random() < current_epsilon:
             action = random.choice(valid_moves)
         else:
             # Q値が最大の行動を選択
             best_move = None
             best_q_value = float('-inf')
-            
             for move in valid_moves:
                 action_key = f"{state_key}_{move[0]}_{move[1]}"
                 q_value = qtable.get(action_key, 0.0)
                 if q_value > best_q_value:
                     best_q_value = q_value
                     best_move = move
-            
             if best_move is None:
                 action = random.choice(valid_moves)
             else:
@@ -242,7 +274,38 @@ class OthelloGame:
         r, c = action
         flipped = self._get_flipped_stones(r, c, player)
         reward = len(flipped) * REWARD_FLIP_PER_STONE
+        
+        # --- 戦略的報酬の計算 ---
+        # 角を取った場合の報酬
+        corners = [(0,0), (0,7), (7,0), (7,7)]
+        if (r, c) in corners:
+            reward += REWARD_CORNER
+        
+        # エッジを取った場合のペナルティ（角の隣は危険）
+        edges = [(0,1), (0,6), (1,0), (1,7), (6,0), (6,7), (7,1), (7,6)]
+        if (r, c) in edges:
+            reward += REWARD_EDGE
+        
+        # 安定石の報酬（角に隣接する石）
+        stable_positions = [(0,1), (1,0), (1,1), (0,6), (1,6), (1,7), (6,0), (6,1), (7,1), (6,6), (6,7), (7,6)]
+        if (r, c) in stable_positions:
+            reward += REWARD_STABLE_STONE
+        
+        # 中心部の報酬
+        center_positions = [(3,3), (3,4), (4,3), (4,4)]
+        if (r, c) in center_positions:
+            reward += REWARD_TERRITORY
+        
+        # モビリティ（合法手の数）の報酬
+        opponent = PLAYER_WHITE if player == PLAYER_BLACK else PLAYER_BLACK
+        opponent_moves_before = len(self.get_valid_moves(opponent))
+        
         self.make_move(r, c, player)
+        
+        opponent_moves_after = len(self.get_valid_moves(opponent))
+        mobility_change = opponent_moves_before - opponent_moves_after
+        reward += mobility_change * REWARD_MOBILITY
+        
         self.message = f"{'黒' if player == PLAYER_BLACK else '白'} (Q学習AI) が {chr(ord('A') + c)}{r+1} に置きました。(報酬: {reward})"
         self.ai_last_reward = reward
         self.last_ai_move = (r, c)
@@ -252,21 +315,16 @@ class OthelloGame:
             next_state_key = self.get_board_state_key()
             next_player = PLAYER_WHITE if player == PLAYER_BLACK else PLAYER_BLACK
             next_valid_moves = self.get_valid_moves(next_player)
-            
-            # 次の状態での最大Q値を計算
             max_next_q = 0.0
             if next_valid_moves:
                 max_next_q = max(qtable.get(f"{next_state_key}_{move[0]}_{move[1]}", 0.0) 
                                for move in next_valid_moves)
             else:
                 max_next_q = self.calculate_game_result_reward(player)
-            
-            # Q値を更新
             action_key = f"{state_key}_{action[0]}_{action[1]}"
             current_q = qtable.get(action_key, 0.0)
             new_q = current_q + ALPHA * (reward + GAMMA * max_next_q - current_q)
             qtable[action_key] = new_q
-            
         return True
 
     def get_ai_move(self):

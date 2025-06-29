@@ -9,6 +9,7 @@ from typing import Optional  # 型ヒント用
 from datetime import datetime  # タイムスタンプ用
 from collections import deque  # 履歴管理用
 import math
+from settings import load_window_size_config  # 画面サイズ設定読み込み用
 
 # 学習履歴管理クラスを定義
 class LearningHistory:
@@ -594,8 +595,16 @@ class OthelloGame:
 
 # Pygame初期化・フォント・画面サイズ
 pygame.init()
-WINDOW_WIDTH = GRAPH_AREA_WIDTH + BOARD_PIXEL_SIZE + BOARD_OFFSET_X + 50
-WINDOW_HEIGHT = BOARD_PIXEL_SIZE + BOARD_OFFSET_Y * 2 + 200
+
+# 画面サイズ設定を読み込み
+WINDOW_WIDTH, WINDOW_HEIGHT = load_window_size_config()
+
+# 画面サイズを再計算（設定されたサイズに基づいて調整）
+if WINDOW_WIDTH < GRAPH_AREA_WIDTH + BOARD_PIXEL_SIZE + BOARD_OFFSET_X + 50:
+    WINDOW_WIDTH = GRAPH_AREA_WIDTH + BOARD_PIXEL_SIZE + BOARD_OFFSET_X + 50
+if WINDOW_HEIGHT < BOARD_PIXEL_SIZE + BOARD_OFFSET_Y * 2 + 200:
+    WINDOW_HEIGHT = BOARD_PIXEL_SIZE + BOARD_OFFSET_Y * 2 + 200
+
 screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 pygame.display.set_caption("オセロゲーム")
 
@@ -1129,9 +1138,9 @@ def draw_battle_history_screen(screen, font):
     help_rect = help_text.get_rect(center=(WINDOW_WIDTH//2, WINDOW_HEIGHT - 120))
     screen.blit(help_text, help_rect)
 
-def mode_select_screen(screen, font):
+def mode_select_screen(screen_param, font):
     """モード選択画面"""
-    global current_mode, pretrain_total, DEBUG_MODE, ai_speed, draw_mode, current_screen
+    global current_mode, pretrain_total, DEBUG_MODE, ai_speed, draw_mode, current_screen, screen, WINDOW_WIDTH, WINDOW_HEIGHT
     selecting = True
     input_mode = False
     speed_input_mode = False
@@ -1169,8 +1178,8 @@ def mode_select_screen(screen, font):
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、モード選択画面を閉じる
+                selecting = False
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mouse_down = True
             if event.type == pygame.KEYDOWN:
@@ -1289,7 +1298,28 @@ def mode_select_screen(screen, font):
         if draw_enhanced_button(screen, WINDOW_WIDTH//2-150, settings_button_y, 300, 65, 
                               "設定", "⚙", "AIや学習の各種設定を変更できます", 
                               (180, 180, 180, 180), (220, 220, 220, 180), mouse_pos, mouse_down, font, animation_time):
-            settings_screen(screen, font)
+            # 設定画面を呼び出し、画面サイズ設定も取得
+            try:
+                result = settings_screen(screen, font)
+                if result == "back_to_mode_select":
+                    # 設定画面から戻るボタンが押された場合、モード選択画面に戻る
+                    return "mode_select"
+                elif isinstance(result, tuple):
+                    if len(result) >= 6:  # 画面サイズ設定が含まれている場合
+                        DEBUG_MODE, ai_speed, draw_mode, pretrain_total, new_width, new_height = result[:6]
+                        # 画面サイズが変更された場合
+                        if new_width != WINDOW_WIDTH or new_height != WINDOW_HEIGHT:
+                            WINDOW_WIDTH, WINDOW_HEIGHT = new_width, new_height
+                            screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+                            print(f"画面サイズを変更しました: {WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+                    elif len(result) >= 4:  # 通常の設定値のみ
+                        DEBUG_MODE, ai_speed, draw_mode, pretrain_total = result[:4]
+                # それ以外の場合も必ずモード選択画面に戻る
+                return "mode_select"
+            except Exception as e:
+                print(f"設定画面でエラーが発生しました: {e}")
+                # エラーが発生してもアプリは継続
+                pass
         
         pygame.display.flip()
         pygame.time.Clock().tick(60)
@@ -1437,8 +1467,8 @@ def show_save_complete_message(save_name):
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、この関数だけ終了
+                return
             elif event.type == pygame.KEYDOWN:
                 waiting = False
         pygame.time.Clock().tick(60)
@@ -1460,8 +1490,8 @@ def show_new_data_input():
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、Noneを返す
+                return None
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
                     return "new_data"
@@ -1490,8 +1520,8 @@ def show_confirm_new_data_message(new_name):
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、この関数だけ終了
+                return
             elif event.type == pygame.KEYDOWN:
                 waiting = False
         pygame.time.Clock().tick(60)
@@ -1515,8 +1545,8 @@ def show_confirm_delete_message(data_name):
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、この関数だけ終了
+                return
             elif event.type == pygame.KEYDOWN:
                 waiting = False
         pygame.time.Clock().tick(60)
@@ -1540,8 +1570,8 @@ def show_no_saved_data_message():
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、この関数だけ終了
+                return
             elif event.type == pygame.KEYDOWN:
                 waiting = False
         pygame.time.Clock().tick(60)
@@ -1565,8 +1595,8 @@ def show_load_complete_message(data_name):
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、この関数だけ終了
+                return
             elif event.type == pygame.KEYDOWN:
                 waiting = False
         pygame.time.Clock().tick(60)
@@ -1590,8 +1620,8 @@ def show_save_error_message():
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、この関数だけ終了
+                return
             elif event.type == pygame.KEYDOWN:
                 waiting = False
         pygame.time.Clock().tick(60)
@@ -2702,8 +2732,8 @@ def show_load_error_message():
     while waiting:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、この関数だけ終了
+                return
             elif event.type == pygame.KEYDOWN:
                 waiting = False
         pygame.time.Clock().tick(60)
@@ -2746,8 +2776,8 @@ def settings_screen(screen, font):
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                # アプリ全体を終了せず、設定画面だけ閉じる
+                running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mouse_down = True
             elif event.type == pygame.KEYDOWN:
@@ -2852,26 +2882,29 @@ def settings_screen(screen, font):
         y_offset += item_height + 40
         
         # 高速モード
-        draw_toggle_setting(screen, "高速モード", fast_mode, 
+        if draw_toggle_setting(screen, "高速モード", fast_mode, 
                            "AI同士の対戦を高速で実行", 
                            WINDOW_WIDTH//2 - 200, y_offset, 400, 60, 
-                           mouse_pos, mouse_down, font, small_font)
+                           mouse_pos, mouse_down, font, small_font):
+            fast_mode = not fast_mode
         
         y_offset += 80
         
         # 描画モード
-        draw_toggle_setting(screen, "描画モード", draw_mode, 
+        if draw_toggle_setting(screen, "描画モード", draw_mode, 
                            "ゲーム画面の描画を有効にする", 
                            WINDOW_WIDTH//2 - 200, y_offset, 400, 60, 
-                           mouse_pos, mouse_down, font, small_font)
+                           mouse_pos, mouse_down, font, small_font):
+            draw_mode = not draw_mode
         
         y_offset += 80
         
         # デバッグモード
-        draw_toggle_setting(screen, "デバッグモード", DEBUG_MODE, 
+        if draw_toggle_setting(screen, "デバッグモード", DEBUG_MODE, 
                            "デバッグ情報を表示する", 
                            WINDOW_WIDTH//2 - 200, y_offset, 400, 60, 
-                           mouse_pos, mouse_down, font, small_font)
+                           mouse_pos, mouse_down, font, small_font):
+            DEBUG_MODE = not DEBUG_MODE
         
         # 戻るボタン
         back_button_rect = pygame.Rect(WINDOW_WIDTH//2 - 100, WINDOW_HEIGHT - 80, 200, 50)
@@ -2883,7 +2916,8 @@ def settings_screen(screen, font):
         
         # 戻るボタンのクリック判定
         if mouse_down and back_button_rect.collidepoint(mouse_pos):
-            running = False
+            # 設定画面を閉じて、モード選択画面に戻ることを示す特別な値を返す
+            return "back_to_mode_select"
         
         # 操作説明
         help_font = get_japanese_font(16)
@@ -2893,6 +2927,9 @@ def settings_screen(screen, font):
         
         pygame.display.flip()
         pygame.time.Clock().tick(60)
+    
+    # 通常の終了時は設定値を返す
+    return (DEBUG_MODE, ai_speed, draw_mode, pretrain_total, WINDOW_WIDTH, WINDOW_HEIGHT)
 
 def draw_setting_item(screen, title, value, description, is_input_mode, x, y, width, height, 
                      mouse_pos, mouse_down, font, small_font, tiny_font):
@@ -2924,8 +2961,6 @@ def draw_setting_item(screen, title, value, description, is_input_mode, x, y, wi
 def draw_toggle_setting(screen, title, value, description, x, y, width, height, 
                        mouse_pos, mouse_down, font, small_font):
     """トグル設定項目を描画"""
-    global fast_mode, draw_mode, DEBUG_MODE
-    
     rect = pygame.Rect(x, y, width, height)
     is_hover = rect.collidepoint(mouse_pos)
     
@@ -2960,13 +2995,7 @@ def draw_toggle_setting(screen, title, value, description, x, y, width, height,
     screen.blit(toggle_text_surface, toggle_text_rect)
     
     # クリックでトグル
-    if mouse_down and toggle_rect.collidepoint(mouse_pos):
-        if title == "高速モード":
-            fast_mode = not fast_mode
-        elif title == "描画モード":
-            draw_mode = not draw_mode
-        elif title == "デバッグモード":
-            DEBUG_MODE = not DEBUG_MODE
+    return mouse_down and toggle_rect.collidepoint(mouse_pos)
 
 if __name__ == "__main__":
     main_loop() 
