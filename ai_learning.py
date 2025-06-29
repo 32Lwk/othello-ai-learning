@@ -19,10 +19,10 @@ class LearningHistory:
         self.load_history()
     
     def add_record(self, game_count, ai_learn_count, ai_win_count, ai_lose_count, 
-                   ai_draw_count, ai_total_reward, ai_avg_reward, qtable_size, black_score=0, white_score=0):
+                   ai_draw_count, ai_total_reward, ai_avg_reward, qtable_size, black_score=0, white_score=0, game_type="unknown"):
         record = {
             "timestamp": datetime.now().isoformat(),
-            "game_count": game_count,
+            "game_count": game_count,  # 累積の総対戦回数
             "ai_learn_count": ai_learn_count,
             "ai_win_count": ai_win_count,
             "ai_lose_count": ai_lose_count,
@@ -32,7 +32,9 @@ class LearningHistory:
             "qtable_size": qtable_size,
             "black_score": black_score,
             "white_score": white_score,
-            "win_rate": self._calculate_win_rate(ai_win_count, ai_lose_count, ai_draw_count)
+            "win_rate": self._calculate_win_rate(ai_win_count, ai_lose_count, ai_draw_count),
+            "total_games": ai_win_count + ai_lose_count + ai_draw_count,  # 勝敗記録の合計（検証用）
+            "game_type": game_type  # 対戦タイプ: "human_vs_ai", "ai_vs_ai", "unknown"
         }
         
         self.history.append(record)
@@ -65,6 +67,9 @@ class LearningHistory:
     def get_avg_reward_history(self):
         return [record["ai_avg_reward"] for record in self.history]
     
+    def get_qtable_size_history(self):
+        return [record["qtable_size"] for record in self.history]
+    
     def get_learn_count_history(self):
         return [record["ai_learn_count"] for record in self.history]
     
@@ -91,6 +96,79 @@ class LearningHistory:
         except Exception as e:
             print(f"学習履歴の読み込みエラー ({filename}): {e}")
             self.history = deque(maxlen=self.max_history)
+
+    def get_cumulative_stats(self):
+        """履歴全体の累積値から統計を算出（履歴全体から正確に計算）"""
+        if not self.history:
+            return None
+        
+        # 履歴全体から累積値を計算
+        total_learn = 0
+        total_win = 0
+        total_lose = 0
+        total_draw = 0
+        total_reward = 0
+        total_games = 0
+        
+        # 各記録の増分を計算して累積値を算出
+        prev_learn = 0
+        prev_win = 0
+        prev_lose = 0
+        prev_draw = 0
+        prev_reward = 0
+        prev_games = 0
+        
+        for record in self.history:
+            # 現在の記録値
+            curr_learn = record.get("ai_learn_count", 0)
+            curr_win = record.get("ai_win_count", 0)
+            curr_lose = record.get("ai_lose_count", 0)
+            curr_draw = record.get("ai_draw_count", 0)
+            curr_reward = record.get("ai_total_reward", 0)
+            curr_games = record.get("total_games", 0)
+            
+            # 増分を計算（前回との差分）
+            learn_increment = max(0, curr_learn - prev_learn)
+            win_increment = max(0, curr_win - prev_win)
+            lose_increment = max(0, curr_lose - prev_lose)
+            draw_increment = max(0, curr_draw - prev_draw)
+            reward_increment = max(0, curr_reward - prev_reward)
+            games_increment = max(0, curr_games - prev_games)
+            
+            # 累積値に加算
+            total_learn += learn_increment
+            total_win += win_increment
+            total_lose += lose_increment
+            total_draw += draw_increment
+            total_reward += reward_increment
+            total_games += games_increment
+            
+            # 前回値を更新
+            prev_learn = curr_learn
+            prev_win = curr_win
+            prev_lose = curr_lose
+            prev_draw = curr_draw
+            prev_reward = curr_reward
+            prev_games = curr_games
+        
+        # 平均報酬と勝率を計算
+        avg_reward = (total_reward / total_learn) if total_learn > 0 else 0
+        win_rate = (total_win / (total_win + total_lose + total_draw) * 100) if (total_win + total_lose + total_draw) > 0 else 0
+        
+        # 最新のQテーブルサイズを取得
+        latest_qtable_size = self.history[-1].get("qtable_size", 0) if self.history else 0
+        
+        return {
+            "ai_learn_count": total_learn,
+            "ai_win_count": total_win,
+            "ai_lose_count": total_lose,
+            "ai_draw_count": total_draw,
+            "ai_total_reward": total_reward,
+            "ai_avg_reward": avg_reward,
+            "win_rate": win_rate,
+            "total_games": total_games,
+            "qtable_size": latest_qtable_size
+        }
 
 class LearningGraph:
     def __init__(self):
@@ -152,15 +230,26 @@ def load_qtable():
     return {}
 
 # AIの手番実行（Q学習）
-def ai_qlearning_move(game, qtable, learn=True, player=None):
+def ai_qlearning_move(game, qtable, learn=True, player=None, ai_learn_count=0):
     if player is None:
         player = game.current_player
     state_key = game.get_board_state_key()
     valid_moves = game.get_valid_moves(player)
     if not valid_moves:
         return False
+    
+    # --- 自己対戦用のε-greedy探索率（より洗練された減衰） ---
+    initial_epsilon = 0.3  # 初期値
+    min_epsilon = 0.05     # 最小値
+    decay_rate = 0.998     # 減衰率
+    current_epsilon = max(min_epsilon, initial_epsilon * (decay_rate ** ai_learn_count))
+    
+    # 自己対戦時は探索率を少し下げる（より戦略的な行動）
+    if learn:
+        current_epsilon *= 0.8
+    
     # ε-greedy法
-    if random.random() < EPSILON:
+    if random.random() < current_epsilon:
         action = random.choice(valid_moves)
     else:
         best_move = None
@@ -172,13 +261,88 @@ def ai_qlearning_move(game, qtable, learn=True, player=None):
                 best_q_value = q_value
                 best_move = move
         action = best_move if best_move is not None else random.choice(valid_moves)
+    
     r, c = action
     flipped = game._get_flipped_stones(r, c, player)
     reward = len(flipped) * REWARD_FLIP_PER_STONE
+    
+    # --- 戦略的報酬の計算（自己対戦強化版） ---
+    # 角を取った場合の報酬
+    corners = [(0,0), (0,7), (7,0), (7,7)]
+    if (r, c) in corners:
+        reward += REWARD_CORNER
+    
+    # エッジを取った場合のペナルティ（角の隣は危険）
+    edges = [(0,1), (0,6), (1,0), (1,7), (6,0), (6,7), (7,1), (7,6)]
+    if (r, c) in edges:
+        reward += REWARD_EDGE
+    
+    # 安定石の報酬（角に隣接する石）
+    stable_positions = [(0,1), (1,0), (1,1), (0,6), (1,6), (1,7), (6,0), (6,1), (7,1), (6,6), (6,7), (7,6)]
+    if (r, c) in stable_positions:
+        reward += REWARD_STABLE_STONE
+    
+    # 中心部の報酬
+    center_positions = [(3,3), (3,4), (4,3), (4,4)]
+    if (r, c) in center_positions:
+        reward += REWARD_TERRITORY
+    
+    # 位置による報酬（自己対戦強化版）
+    # 盤面の外側から内側に向かって報酬が増加
+    distance_from_edge = min(r, 7-r, c, 7-c)
+    reward += distance_from_edge * REWARD_POSITIONAL
+    
+    # モビリティ（合法手の数）の報酬
+    opponent = PLAYER_WHITE if player == PLAYER_BLACK else PLAYER_BLACK
+    opponent_moves_before = len(game.get_valid_moves(opponent))
+    
     game.make_move(r, c, player)
+    
+    opponent_moves_after = len(game.get_valid_moves(opponent))
+    mobility_change = opponent_moves_before - opponent_moves_after
+    reward += mobility_change * REWARD_MOBILITY
+    
+    # --- 自己対戦特有の報酬設計 ---
+    # 相手の選択肢を制限する手への追加報酬
+    if opponent_moves_after == 0:
+        reward += 5  # 相手のパスを強制した場合のボーナス
+    
+    # 終盤での石の数の重要性を増加
+    total_moves = sum(1 for row in game.board for cell in row if cell != 0)
+    if total_moves > 50:  # 終盤（50手以降）
+        reward *= 1.2  # 報酬を20%増加
+    
+    # --- 終局報酬の追加 ---
+    game.check_game_over()
+    if game.game_over:
+        black_score, white_score = game.get_score()
+        if player == PLAYER_WHITE:  # AI（白）の場合
+            if white_score > black_score:
+                reward += REWARD_WIN
+            elif black_score > white_score:
+                reward += REWARD_LOSE
+            else:
+                reward += REWARD_DRAW
+        else:  # AI（黒）の場合
+            if black_score > white_score:
+                reward += REWARD_WIN
+            elif white_score > black_score:
+                reward += REWARD_LOSE
+            else:
+                reward += REWARD_DRAW
+    else:
+        # ゲーム終了前のパリティ（石の数の差）による報酬
+        black_score, white_score = game.get_score()
+        if player == PLAYER_WHITE:
+            parity = white_score - black_score
+        else:
+            parity = black_score - white_score
+        reward += parity * 0.1  # パリティによる小さな報酬
+    
     # AIが石を置いた位置を記録
     if player == PLAYER_WHITE:  # AI（白）の場合のみ
         game.last_ai_move = (r, c)
+    
     if learn:
         next_state_key = game.get_board_state_key()
         next_player = PLAYER_WHITE if player == PLAYER_BLACK else PLAYER_BLACK
@@ -190,34 +354,66 @@ def ai_qlearning_move(game, qtable, learn=True, player=None):
         current_q = qtable.get(action_key, 0.0)
         new_q = current_q + ALPHA * (reward + GAMMA * max_next_q - current_q)
         qtable[action_key] = new_q
-    return True 
+    
+    return True, reward
 
 # 学習データ管理機能
 def save_learning_data(qtable, learning_history, screen, font):
-    """学習データを保存"""
-    # 保存名入力画面を表示
+    """
+    学習データを保存（エラーハンドリング・デバッグ強化）
+    """
     save_name = show_save_name_input(screen, font)
     if not save_name:
-        return  # キャンセルされた場合
-    
+        print("[保存] キャンセルされました")
+        return
     try:
-        # ファイル名を生成
         qtable_filename = f"qtable_{save_name}.pkl"
         history_filename = f"learning_history_{save_name}.json"
-        
-        # Qテーブルを保存
+        print(f"[保存] Qテーブル保存先: {qtable_filename}")
+        print(f"[保存] 履歴保存先: {history_filename}")
         save_qtable_to_file(qtable, qtable_filename)
-        
-        # 学習履歴を保存
         learning_history.save_history_to_file(history_filename)
-        
-        # 保存完了メッセージを表示
         show_save_complete_message(screen, font, save_name)
-        
-        print(f"学習データ '{save_name}' を保存しました")
+        print(f"[保存] 学習データ '{save_name}' を保存しました")
     except Exception as e:
-        print(f"保存エラー: {e}")
-        show_save_error_message(screen, font)
+        import traceback
+        print(f"[保存エラー] {e}")
+        traceback.print_exc()
+        show_save_error_message(screen, font, str(e))
+
+def overwrite_learning_data(qtable, learning_history, screen, font):
+    """
+    学習データを上書き保存（既存データの選択・上書き）
+    """
+    # 保存済みデータの一覧を取得
+    saved_data = get_saved_data_list()
+    if not saved_data:
+        print("[上書き保存] 保存済みデータがありません。新規保存を使用してください。")
+        show_no_saved_data_message(screen, font)
+        return
+    
+    # 上書き対象選択画面を表示
+    selected_data = show_data_selection_screen(screen, font, saved_data, "上書きするデータを選択")
+    if not selected_data:
+        print("[上書き保存] キャンセルされました")
+        return
+    
+    # 上書き確認メッセージを表示
+    if show_confirm_overwrite_message(screen, font, selected_data):
+        try:
+            qtable_filename = f"qtable_{selected_data}.pkl"
+            history_filename = f"learning_history_{selected_data}.json"
+            print(f"[上書き保存] Qテーブル保存先: {qtable_filename}")
+            print(f"[上書き保存] 履歴保存先: {history_filename}")
+            save_qtable_to_file(qtable, qtable_filename)
+            learning_history.save_history_to_file(history_filename)
+            show_overwrite_complete_message(screen, font, selected_data)
+            print(f"[上書き保存] 学習データ '{selected_data}' を上書き保存しました")
+        except Exception as e:
+            import traceback
+            print(f"[上書き保存エラー] {e}")
+            traceback.print_exc()
+            show_save_error_message(screen, font, str(e))
 
 def create_new_learning_data(qtable, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, screen, font):
     """新しい学習データを作成"""
@@ -252,47 +448,48 @@ def create_new_learning_data(qtable, learning_history, game_count, ai_learn_coun
         except Exception as e:
             print(f"新規作成エラー: {e}")
 
-def load_learning_data(qtable, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, screen, font):
-    """学習データを読み込み"""
-    # 保存済みデータの一覧を取得
+def load_learning_data(qtable, learning_history, screen, font):
+    """
+    学習データを読み込み（エラーハンドリング・デバッグ強化・値返却）
+    """
     saved_data = get_saved_data_list()
     if not saved_data:
+        print("[読み込み] 保存済みデータがありません")
         show_no_saved_data_message(screen, font)
-        return
-    
-    # データ選択画面を表示
+        return None
     selected_data = show_data_selection_screen(screen, font, saved_data)
     if not selected_data:
-        return  # キャンセルされた場合
-    
+        print("[読み込み] キャンセルされました")
+        return None
     try:
-        # 選択されたデータを読み込み
         qtable_filename = f"qtable_{selected_data}.pkl"
         history_filename = f"learning_history_{selected_data}.json"
-        
-        # Qテーブルを読み込み
+        print(f"[読み込み] Qテーブル読み込み元: {qtable_filename}")
+        print(f"[読み込み] 履歴読み込み元: {history_filename}")
         qtable.clear()
         qtable.update(load_qtable_from_file(qtable_filename))
-        
-        # 学習履歴を読み込み
         learning_history.load_history_from_file(history_filename)
-        
-        # 統計を更新
         latest = learning_history.get_latest_stats()
-        if latest:
-            game_count = latest['game_count']
-            ai_learn_count = latest['ai_learn_count']
-            ai_win_count = latest['ai_win_count']
-            ai_lose_count = latest['ai_lose_count']
-            ai_draw_count = latest['ai_draw_count']
-            ai_total_reward = latest['ai_total_reward']
-            ai_avg_reward = latest['ai_avg_reward']
-        
         show_load_complete_message(screen, font, selected_data)
-        print(f"学習データ '{selected_data}' を読み込みました")
+        print(f"[読み込み] 学習データ '{selected_data}' を読み込みました")
+        if latest:
+            return (
+                latest['game_count'],
+                latest['ai_learn_count'],
+                latest['ai_win_count'],
+                latest['ai_lose_count'],
+                latest['ai_draw_count'],
+                latest['ai_total_reward'],
+                latest['ai_avg_reward']
+            )
+        else:
+            return None
     except Exception as e:
-        print(f"読み込みエラー: {e}")
-        show_load_error_message(screen, font)
+        import traceback
+        print(f"[読み込みエラー] {e}")
+        traceback.print_exc()
+        show_load_error_message(screen, font, str(e))
+        return None
 
 def confirm_delete_learning_data(screen, font):
     """学習データ削除の確認"""
@@ -633,50 +830,148 @@ def show_confirm_new_data_message(screen, font, new_name):
 
 def show_confirm_delete_message(screen, font, data_name):
     """削除確認メッセージを表示"""
-    WINDOW_WIDTH = 1200
-    WINDOW_HEIGHT = 800
-    WHITE = (255, 255, 255)
+    screen.fill((30, 60, 80))
     
-    screen.fill(WHITE)
-    title = font.render("削除確認", True, (0, 0, 0))
-    screen.blit(title, (WINDOW_WIDTH//2 - title.get_width()//2, 150))
+    # タイトル
+    title_text = font.render("削除確認", True, (255, 255, 255))
+    screen.blit(title_text, (WINDOW_WIDTH//2 - title_text.get_width()//2, 200))
     
-    message1 = font.render(f"学習データ '{data_name}' を削除しますか？", True, (0, 0, 0))
-    screen.blit(message1, (WINDOW_WIDTH//2 - message1.get_width()//2, 200))
+    # メッセージ
+    message_font = get_japanese_font(24)
+    message_text = message_font.render(f"学習データ '{data_name}' を削除しますか？", True, (255, 255, 255))
+    screen.blit(message_text, (WINDOW_WIDTH//2 - message_text.get_width()//2, 250))
     
-    message2 = font.render("この操作は取り消せません", True, (255, 0, 0))
-    screen.blit(message2, (WINDOW_WIDTH//2 - message2.get_width()//2, 230))
+    warning_text = message_font.render("この操作は取り消せません", True, (255, 200, 200))
+    screen.blit(warning_text, (WINDOW_WIDTH//2 - warning_text.get_width()//2, 290))
     
     # ボタン
-    delete_button = pygame.Rect(WINDOW_WIDTH//2 - 150, 280, 120, 40)
-    pygame.draw.rect(screen, (255, 100, 100), delete_button)
-    pygame.draw.rect(screen, (200, 50, 50), delete_button, 2)
-    delete_text = font.render("削除", True, (0, 0, 0))
+    button_font = get_japanese_font(20)
+    
+    # 削除ボタン
+    delete_button = pygame.Rect(WINDOW_WIDTH//2 - 200, 350, 150, 50)
+    pygame.draw.rect(screen, (200, 50, 50), delete_button)
+    pygame.draw.rect(screen, (255, 255, 255), delete_button, 2)
+    delete_text = button_font.render("削除", True, (255, 255, 255))
     delete_text_rect = delete_text.get_rect(center=delete_button.center)
     screen.blit(delete_text, delete_text_rect)
     
-    cancel_button = pygame.Rect(WINDOW_WIDTH//2 + 30, 280, 120, 40)
-    pygame.draw.rect(screen, (200, 200, 200), cancel_button)
-    pygame.draw.rect(screen, (100, 100, 100), cancel_button, 2)
-    cancel_text = font.render("キャンセル", True, (0, 0, 0))
+    # キャンセルボタン
+    cancel_button = pygame.Rect(WINDOW_WIDTH//2 + 50, 350, 150, 50)
+    pygame.draw.rect(screen, (100, 100, 100), cancel_button)
+    pygame.draw.rect(screen, (255, 255, 255), cancel_button, 2)
+    cancel_text = button_font.render("キャンセル", True, (255, 255, 255))
     cancel_text_rect = cancel_text.get_rect(center=cancel_button.center)
     screen.blit(cancel_text, cancel_text_rect)
     
     pygame.display.flip()
     
-    # 選択処理
+    # ユーザー入力を待つ
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
-            elif event.type == pygame.MOUSEBUTTONDOWN:
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mouse_pos = pygame.mouse.get_pos()
                 if delete_button.collidepoint(mouse_pos):
                     return True
                 elif cancel_button.collidepoint(mouse_pos):
                     return False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return False
+                elif event.key == pygame.K_RETURN:
+                    return True
+
+def show_confirm_overwrite_message(screen, font, data_name):
+    """上書き確認メッセージを表示"""
+    screen.fill((30, 60, 80))
     
-    return False
+    # タイトル
+    title_text = font.render("上書き確認", True, (255, 255, 255))
+    screen.blit(title_text, (WINDOW_WIDTH//2 - title_text.get_width()//2, 200))
+    
+    # メッセージ
+    message_font = get_japanese_font(24)
+    message_text = message_font.render(f"学習データ '{data_name}' を上書きしますか？", True, (255, 255, 255))
+    screen.blit(message_text, (WINDOW_WIDTH//2 - message_text.get_width()//2, 250))
+    
+    warning_text = message_font.render("既存のデータは失われます", True, (255, 200, 200))
+    screen.blit(warning_text, (WINDOW_WIDTH//2 - warning_text.get_width()//2, 290))
+    
+    # ボタン
+    button_font = get_japanese_font(20)
+    
+    # 上書きボタン
+    overwrite_button = pygame.Rect(WINDOW_WIDTH//2 - 200, 350, 150, 50)
+    pygame.draw.rect(screen, (200, 150, 50), overwrite_button)
+    pygame.draw.rect(screen, (255, 255, 255), overwrite_button, 2)
+    overwrite_text = button_font.render("上書き", True, (255, 255, 255))
+    overwrite_text_rect = overwrite_text.get_rect(center=overwrite_button.center)
+    screen.blit(overwrite_text, overwrite_text_rect)
+    
+    # キャンセルボタン
+    cancel_button = pygame.Rect(WINDOW_WIDTH//2 + 50, 350, 150, 50)
+    pygame.draw.rect(screen, (100, 100, 100), cancel_button)
+    pygame.draw.rect(screen, (255, 255, 255), cancel_button, 2)
+    cancel_text = button_font.render("キャンセル", True, (255, 255, 255))
+    cancel_text_rect = cancel_text.get_rect(center=cancel_button.center)
+    screen.blit(cancel_text, cancel_text_rect)
+    
+    pygame.display.flip()
+    
+    # ユーザー入力を待つ
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mouse_pos = pygame.mouse.get_pos()
+                if overwrite_button.collidepoint(mouse_pos):
+                    return True
+                elif cancel_button.collidepoint(mouse_pos):
+                    return False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return False
+                elif event.key == pygame.K_RETURN:
+                    return True
+
+def show_overwrite_complete_message(screen, font, data_name):
+    """上書き完了メッセージを表示"""
+    screen.fill((30, 60, 80))
+    
+    # タイトル
+    title_text = font.render("上書き完了", True, (255, 255, 255))
+    screen.blit(title_text, (WINDOW_WIDTH//2 - title_text.get_width()//2, 200))
+    
+    # メッセージ
+    message_font = get_japanese_font(24)
+    message_text = message_font.render(f"学習データ '{data_name}' を上書き保存しました", True, (255, 255, 255))
+    screen.blit(message_text, (WINDOW_WIDTH//2 - message_text.get_width()//2, 250))
+    
+    # ボタン
+    button_font = get_japanese_font(20)
+    ok_button = pygame.Rect(WINDOW_WIDTH//2 - 100, 350, 200, 50)
+    pygame.draw.rect(screen, (50, 200, 50), ok_button)
+    pygame.draw.rect(screen, (255, 255, 255), ok_button, 2)
+    ok_text = button_font.render("OK", True, (255, 255, 255))
+    ok_text_rect = ok_text.get_rect(center=ok_button.center)
+    screen.blit(ok_text, ok_text_rect)
+    
+    pygame.display.flip()
+    
+    # ユーザー入力を待つ
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mouse_pos = pygame.mouse.get_pos()
+                if ok_button.collidepoint(mouse_pos):
+                    return
+            elif event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_SPACE]:
+                    return
 
 def show_no_saved_data_message(screen, font):
     """保存済みデータなしメッセージを表示"""
@@ -732,7 +1027,7 @@ def show_load_complete_message(screen, font, data_name):
             elif event.type == pygame.KEYDOWN:
                 return
 
-def show_load_error_message(screen, font):
+def show_load_error_message(screen, font, error_message):
     """読み込みエラーメッセージを表示"""
     WINDOW_WIDTH = 1200
     WINDOW_HEIGHT = 800
@@ -742,7 +1037,7 @@ def show_load_error_message(screen, font):
     title = font.render("読み込みエラー", True, (255, 0, 0))
     screen.blit(title, (WINDOW_WIDTH//2 - title.get_width()//2, 200))
     
-    message = font.render("学習データの読み込みに失敗しました", True, (0, 0, 0))
+    message = font.render(f"学習データの読み込みに失敗しました: {error_message}", True, (0, 0, 0))
     screen.blit(message, (WINDOW_WIDTH//2 - message.get_width()//2, 250))
     
     help_text = font.render("任意のキーで続行", True, (100, 100, 100))
@@ -759,7 +1054,7 @@ def show_load_error_message(screen, font):
             elif event.type == pygame.KEYDOWN:
                 return
 
-def show_save_error_message(screen, font):
+def show_save_error_message(screen, font, error_message):
     """保存エラーメッセージを表示"""
     WINDOW_WIDTH = 1200
     WINDOW_HEIGHT = 800
@@ -769,7 +1064,7 @@ def show_save_error_message(screen, font):
     title = font.render("保存エラー", True, (255, 0, 0))
     screen.blit(title, (WINDOW_WIDTH//2 - title.get_width()//2, 200))
     
-    message = font.render("学習データの保存に失敗しました", True, (0, 0, 0))
+    message = font.render(f"学習データの保存に失敗しました: {error_message}", True, (0, 0, 0))
     screen.blit(message, (WINDOW_WIDTH//2 - message.get_width()//2, 250))
     
     help_text = font.render("任意のキーで続行", True, (100, 100, 100))

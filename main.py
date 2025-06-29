@@ -18,7 +18,7 @@ from game_logic import OthelloGame
 from ai_learning import (
     LearningHistory, LearningLogger, save_qtable, load_qtable,
     save_learning_data, create_new_learning_data, load_learning_data, 
-    confirm_delete_learning_data
+    confirm_delete_learning_data, overwrite_learning_data
 )
 from ui_components import (
     draw_board, draw_stones, draw_current_player_indicator, 
@@ -65,6 +65,10 @@ DEBUG_MODE = False
 pretrain_in_progress = False
 pretrain_now = 0
 
+# 画面サイズ変数（グローバル宣言）
+WINDOW_WIDTH = 1200
+WINDOW_HEIGHT = 800
+
 # 学習履歴管理オブジェクト
 learning_history = LearningHistory(max_history=50)
 learning_logger = LearningLogger()
@@ -87,9 +91,15 @@ def main_loop():
     global ai_speed, pretrain_total, fast_mode, draw_mode, DEBUG_MODE
     global show_new_game_message, new_game_message_start_time
     global data_view_mode, battle_history_mode, show_left_graphs, show_learning_progress
+    global WINDOW_WIDTH, WINDOW_HEIGHT
 
-    # モード選択画面を必ず表示
-    mode_select_screen(screen, font)
+    while True:
+        # モード選択画面を表示し、current_modeがセットされるまでループ
+        result = mode_select_screen(screen, font)
+        if result == "mode_select" or current_mode is None:
+            continue
+        else:
+            break
 
     if current_mode == MODE_AI_PRETRAIN:
         current_mode = run_pretrain_mode(screen, font)
@@ -135,7 +145,7 @@ def main_loop():
                 if data_view_mode:
                     show_left_graphs = False  # 左側のグラフを非表示
                     # ボタンの位置を先に取得
-                    save_button, new_button, load_button, delete_button, back_button, progress_btn_rect = draw_learning_data_screen(
+                    save_button, overwrite_button, load_button, new_button, delete_button, back_button, progress_btn_rect = draw_learning_data_screen(
                         screen, font, learning_history, qtable, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_avg_reward, False)
                     # 進捗ON/OFFボタンのクリック判定
                     if progress_btn_rect and progress_btn_rect.collidepoint(mouse_pos):
@@ -147,10 +157,14 @@ def main_loop():
                     if mouse_down:
                         if save_button.collidepoint(mouse_pos):
                             save_learning_data(qtable, learning_history, screen, font)
+                        elif overwrite_button.collidepoint(mouse_pos):
+                            overwrite_learning_data(qtable, learning_history, screen, font)
+                        elif load_button.collidepoint(mouse_pos):
+                            result = load_learning_data(qtable, learning_history, screen, font)
+                            if result:
+                                game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward = result
                         elif new_button.collidepoint(mouse_pos):
                             create_new_learning_data(qtable, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, screen, font)
-                        elif load_button.collidepoint(mouse_pos):
-                            load_learning_data(qtable, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, screen, font)
                         elif delete_button.collidepoint(mouse_pos):
                             confirm_delete_learning_data(screen, font)
                         elif back_button.collidepoint(mouse_pos):
@@ -166,7 +180,7 @@ def main_loop():
                     draw_battle_history_screen(screen, font)
                     # 戻るボタンのクリック判定
                     if mouse_down:
-                        back_button_rect = pygame.Rect(WINDOW_WIDTH//2-100, WINDOW_HEIGHT-80, 200, 50)
+                        back_button_rect = pygame.Rect(WINDOW_WIDTH//2-120, WINDOW_HEIGHT-80, 240, 60)
                         if back_button_rect.collidepoint(mouse_pos):
                             battle_history_mode = False
                             show_left_graphs = True  # 左側のグラフを再表示
@@ -249,9 +263,35 @@ def main_loop():
         
         # AIの手番は自動で進める
         if game.current_player == PLAYER_WHITE and not show_new_game_message and not game.game_over:
+            # AIに有効な手があるかチェック
             if game.get_valid_moves(PLAYER_WHITE):
-                game.ai_qlearning_move(qtable, learn=True, player=PLAYER_WHITE)
-                move_count += 1
+                result = game.ai_qlearning_move(qtable, learn=True, player=PLAYER_WHITE, ai_learn_count=ai_learn_count)
+                if result:  # 手を打った場合
+                    reward = game.ai_last_reward
+                    ai_learn_count += 1
+                    ai_total_reward += reward
+                    ai_avg_reward = ai_total_reward / ai_learn_count if ai_learn_count > 0 else 0
+                    # デバッグ出力
+                    if DEBUG_MODE:
+                        print(f"白の手: 報酬={reward}, 累積報酬={ai_total_reward}, 平均報酬={ai_avg_reward:.2f}, 学習回数={ai_learn_count}")
+                    game.switch_player()
+                    game.check_game_over()
+                else:
+                    # AIに有効な手がない場合はパス
+                    game.message = "AI（白）はパスしました。"
+                    game.switch_player()
+                    game.check_game_over()
+            else:
+                # AIに有効な手がない場合はパス
+                game.message = "AI（白）はパスしました。"
+                game.switch_player()
+                game.check_game_over()
+        
+        # 人間プレイヤー（黒）の手番で有効な手がない場合の処理
+        if game.current_player == PLAYER_BLACK and not show_new_game_message and not game.game_over:
+            if not game.get_valid_moves(PLAYER_BLACK):
+                # 人間プレイヤーに有効な手がない場合はパス
+                game.message = "黒は置ける場所がないためパスしました。"
                 game.switch_player()
                 game.check_game_over()
 
@@ -289,6 +329,8 @@ def main_loop():
 def mode_select_screen(screen, font):
     """モード選択画面"""
     global current_mode, pretrain_total, DEBUG_MODE, ai_speed, draw_mode, data_view_mode, battle_history_mode
+    global ai_learn_count, game_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward
+    global WINDOW_WIDTH, WINDOW_HEIGHT
     selecting = True
     input_mode = False
     speed_input_mode = False
@@ -360,16 +402,20 @@ def mode_select_screen(screen, font):
         # 学習データ表示モードの場合
         if data_view_mode:
             # ボタンの位置を先に取得
-            save_button, new_button, load_button, delete_button, back_button, progress_btn_rect = draw_learning_data_screen(
+            save_button, overwrite_button, load_button, new_button, delete_button, back_button, progress_btn_rect = draw_learning_data_screen(
                 screen, font, learning_history, qtable, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_avg_reward, False)
             # ボタンのクリック判定
             if mouse_down:
                 if save_button.collidepoint(mouse_pos):
                     save_learning_data(qtable, learning_history, screen, font)
+                elif overwrite_button.collidepoint(mouse_pos):
+                    overwrite_learning_data(qtable, learning_history, screen, font)
+                elif load_button.collidepoint(mouse_pos):
+                    result = load_learning_data(qtable, learning_history, screen, font)
+                    if result:
+                        game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward = result
                 elif new_button.collidepoint(mouse_pos):
                     create_new_learning_data(qtable, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, screen, font)
-                elif load_button.collidepoint(mouse_pos):
-                    load_learning_data(qtable, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, screen, font)
                 elif delete_button.collidepoint(mouse_pos):
                     confirm_delete_learning_data(screen, font)
                 elif back_button.collidepoint(mouse_pos):
@@ -383,58 +429,80 @@ def mode_select_screen(screen, font):
             draw_battle_history_screen(screen, font)
             # 戻るボタンのクリック判定
             if mouse_down:
-                back_button_rect = pygame.Rect(WINDOW_WIDTH//2-100, WINDOW_HEIGHT-80, 200, 50)
+                back_button_rect = pygame.Rect(WINDOW_WIDTH//2-120, WINDOW_HEIGHT-80, 240, 60)
                 if back_button_rect.collidepoint(mouse_pos):
                     battle_history_mode = False
             pygame.display.flip()
             pygame.time.Clock().tick(30)
             continue
         
-        # ボタンを描画
+        # ボタンを描画（画面中央に配置）
+        button_width = 300  # ボタン幅を元のサイズに戻す
+        button_height = 65  # ボタン高さを元のサイズに戻す
+        button_x = (WINDOW_WIDTH - button_width) // 2  # 中央配置
         button_y_start = 180
-        button_spacing = 85
+        button_spacing = 85  # 間隔を元に戻す
         
         # 対戦モードボタン
-        if draw_enhanced_button(screen, WINDOW_WIDTH//2-150, button_y_start, 300, 65, 
-                              "対戦モード", "⚔", "人間プレイヤーとしてAIと直接対戦し、AIを学習させます", 
-                              (100, 150, 255, 180), (150, 200, 255, 180), mouse_pos, mouse_down, font, animation_time):
+        if draw_enhanced_button(screen, button_x, button_y_start, button_width, button_height, 
+                              "対戦モード", "🎮", "人間プレイヤーとしてAIと直接対戦し、AIを学習させます", 
+                              (100, 150, 255, 150), (150, 200, 255, 150), mouse_pos, mouse_down, font, animation_time):  # 半透明に
             current_mode = MODE_HUMAN_TRAIN
             selecting = False
         
         # 事前訓練モードボタン
-        if draw_enhanced_button(screen, WINDOW_WIDTH//2-150, button_y_start + button_spacing, 300, 65, 
-                              "事前訓練", "🎯", "AI同士で事前訓練を行い、その後人間と対戦します", 
-                              (255, 150, 100, 180), (255, 180, 130, 180), mouse_pos, mouse_down, font, animation_time):
+        if draw_enhanced_button(screen, button_x, button_y_start + button_spacing, button_width, button_height, 
+                              "事前訓練", "🤖", "AI同士で事前訓練を行い、その後人間と対戦します", 
+                              (255, 150, 100, 150), (255, 180, 130, 150), mouse_pos, mouse_down, font, animation_time):  # 半透明に
             current_mode = MODE_AI_PRETRAIN
             selecting = False
         
         # 学習データ確認ボタン
-        if draw_enhanced_button(screen, WINDOW_WIDTH//2-150, button_y_start + button_spacing * 2, 300, 65, 
+        if draw_enhanced_button(screen, button_x, button_y_start + button_spacing * 2, button_width, button_height, 
                               "学習データ", "📊", "AIの学習進捗と統計データを詳細に確認できます", 
-                              (100, 255, 150, 180), (130, 255, 180, 180), mouse_pos, mouse_down, font, animation_time):
+                              (100, 255, 150, 150), (130, 255, 180, 150), mouse_pos, mouse_down, font, animation_time):  # 半透明に
             data_view_mode = True
         
         # 対戦記録ボタン
-        if draw_enhanced_button(screen, WINDOW_WIDTH//2-150, button_y_start + button_spacing * 3, 300, 65, 
+        if draw_enhanced_button(screen, button_x, button_y_start + button_spacing * 3, button_width, button_height, 
                               "対戦記録", "📋", "過去の対戦結果と詳細な記録を確認できます", 
-                              (255, 100, 150, 180), (255, 130, 180, 180), mouse_pos, mouse_down, font, animation_time):
+                              (255, 100, 150, 150), (255, 130, 180, 150), mouse_pos, mouse_down, font, animation_time):  # 半透明に
             battle_history_mode = True
         
-        # 統計情報を描画
+        # 統計情報を描画（右側に表示）
         draw_quick_stats(screen, animation_time, ai_learn_count, game_count)
         
         # 設定ボタンを追加
         settings_button_y = button_y_start + button_spacing * 4
-        if draw_enhanced_button(screen, WINDOW_WIDTH//2-150, settings_button_y, 300, 65, 
-                              "設定", "⚙", "AIや学習の各種設定を変更できます", 
-                              (180, 180, 180, 180), (220, 220, 220, 180), mouse_pos, mouse_down, font, animation_time):
-            DEBUG_MODE, ai_speed, draw_mode, pretrain_total = settings_screen(screen, font, DEBUG_MODE, ai_speed, draw_mode, pretrain_total)
+        if draw_enhanced_button(screen, button_x, settings_button_y, button_width, button_height, 
+                              "設定", "⚙️", "AIや学習の各種設定を変更できます", 
+                              (180, 180, 180, 150), (220, 220, 220, 150), mouse_pos, mouse_down, font, animation_time):  # 半透明に
+            result = settings_screen(screen, font, DEBUG_MODE, ai_speed, draw_mode, pretrain_total)
+            if isinstance(result, tuple) and len(result) >= 9:
+                # 設定画面から戻った場合、値をグローバル変数に反映
+                DEBUG_MODE, ai_speed, draw_mode, new_pretrain_total, fast_mode, draw_mode, DEBUG_MODE, new_width, new_height = result[:9]
+                
+                print(f"main.py: 設定画面から受け取った値 - new_pretrain_total: {new_pretrain_total}")
+                print(f"main.py: 現在のグローバル変数 - pretrain_total: {pretrain_total}")
+                
+                # 訓練回数の変更を反映
+                if new_pretrain_total != pretrain_total:
+                    pretrain_total = new_pretrain_total
+                    print(f"main.py: 訓練回数を変更しました: {pretrain_total}")
+                else:
+                    print(f"main.py: 訓練回数は変更されていません")
+                
+                # 画面サイズが変更された場合
+                if new_width != WINDOW_WIDTH or new_height != WINDOW_HEIGHT:
+                    WINDOW_WIDTH, WINDOW_HEIGHT = new_width, new_height
+                    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+                    print(f"画面サイズを変更しました: {WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         pygame.display.flip()
         pygame.time.Clock().tick(60)
 
 def initialize_game_screen(game_obj):
-    global game, game_count, move_count, last_move_count
+    global game, game_count, move_count, last_move_count, WINDOW_WIDTH, WINDOW_HEIGHT
     game = game_obj
     move_count = 0
     last_move_count = 0
@@ -459,7 +527,7 @@ def initialize_game_screen(game_obj):
 
 def handle_mouse_click(pos):
     global game, move_count, last_move_count, ai_learn_count, ai_total_reward, ai_avg_reward
-    global ai_win_count, ai_lose_count, ai_draw_count, show_new_game_message
+    global ai_win_count, ai_lose_count, ai_draw_count, show_new_game_message, game_count
     if current_mode != MODE_HUMAN_TRAIN or game.game_over:
         return
     x, y = pos
@@ -491,16 +559,23 @@ def handle_mouse_click(pos):
                         result_message = "引き分け"
                         ai_draw_count += 1
                     
+                    # 総対戦回数を更新
+                    game_count += 1
+                    
                     # 詳細な結果表示
-                    display_game_result(screen, result_message, game.ai_last_reward, black_score, white_score, ai_learn_count)
+                    display_game_result(screen, result_message, int(game.ai_last_reward), black_score, white_score, ai_learn_count)
                     show_new_game_message = True
                     new_game_message_start_time = pygame.time.get_ticks()
                     
-                    # 学習履歴に記録
+                    # より詳細な学習履歴記録
                     learning_history.add_record(
                         game_count, ai_learn_count, ai_win_count, ai_lose_count, 
-                        ai_draw_count, ai_total_reward, ai_avg_reward, len(qtable), black_score, white_score
+                        ai_draw_count, ai_total_reward, ai_avg_reward, len(qtable), black_score, white_score, "human_vs_ai"
                     )
+                    
+                    # デバッグ出力：学習履歴記録時の情報
+                    if DEBUG_MODE:
+                        print(f"学習履歴記録: 対戦{game_count}, 学習回数={ai_learn_count}, 累積報酬={ai_total_reward:.2f}, 平均報酬={ai_avg_reward:.2f}, Qテーブルサイズ={len(qtable)}")
                     
                     # 学習データを保存
                     save_learning_data(qtable, learning_history, screen, font)
@@ -509,8 +584,19 @@ def handle_mouse_click(pos):
                 
                 # AIの手番
                 if game.current_player == PLAYER_WHITE:
-                    game.ai_qlearning_move(qtable, learn=True, player=PLAYER_WHITE)
+                    result = game.ai_qlearning_move(qtable, learn=True, player=PLAYER_WHITE, ai_learn_count=ai_learn_count)
+                    if result:  # 手を打った場合
+                        reward = game.ai_last_reward
+                        ai_learn_count += 1
+                        ai_total_reward += reward
+                        ai_avg_reward = ai_total_reward / ai_learn_count if ai_learn_count > 0 else 0
                     game.switch_player()
+            else:
+                # 無効な手を打った場合のエラーメッセージ
+                game.message = "そこには置けません。"
+                game.last_move_error = True
+                game.error_message = "無効な手です"
+                game.error_start_time = pygame.time.get_ticks()
 
 def reset_game():
     global game, move_count, last_move_count, show_new_game_message
@@ -521,6 +607,7 @@ def reset_game():
     initialize_game_screen(game)
 
 def update_learning_stats():
+    """学習統計を更新"""
     global ai_avg_reward
     if ai_learn_count > 0:
         ai_avg_reward = ai_total_reward / ai_learn_count
@@ -535,8 +622,10 @@ def run_pretrain_mode(screen, font):
     global pretrain_in_progress, pretrain_now, pretrain_total
     global win_black, win_white, ai_win_count, ai_lose_count, ai_draw_count
     global ai_learn_count, ai_total_reward, ai_avg_reward, game_count, move_count, last_move_count
-    global qtable, game, learning_history, draw_mode
+    global qtable, game, learning_history, draw_mode, WINDOW_WIDTH, WINDOW_HEIGHT
 
+    print(f"run_pretrain_mode: 開始 - 訓練回数: {pretrain_total}")
+    
     pretrain_in_progress = True
     pretrain_now = 0
     win_black = 0
@@ -584,18 +673,18 @@ def run_pretrain_mode(screen, font):
             # 描画モードON: 通常のゲーム画面を表示
             screen.fill(WHITE)
             
-            # 進捗バーを上部に表示
+            # 進捗バーを上部右側に表示（グラフエリアと重ならないように）
             progress = pretrain_now / pretrain_total
-            bar_w = 600
+            bar_w = 500  # バーの幅を少し小さく
             bar_h = 30
-            bar_x = (WINDOW_WIDTH - bar_w) // 2
+            bar_x = WINDOW_WIDTH - bar_w - 20  # 右端から20px内側
             bar_y = 20
             pygame.draw.rect(screen, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h))
             pygame.draw.rect(screen, (100, 200, 100), (bar_x, bar_y, int(bar_w*progress), bar_h))
             pygame.draw.rect(screen, (100, 100, 100), (bar_x, bar_y, bar_w, bar_h), 3)
             
-            # 進捗テキスト
-            progress_text = get_japanese_font(18).render(f"訓練進捗: {pretrain_now}/{pretrain_total}", True, (0, 0, 0))
+            # 進捗テキスト（自己対戦モード表示）
+            progress_text = get_japanese_font(18).render(f"自己対戦訓練進捗: {pretrain_now}/{pretrain_total}", True, (0, 0, 0))
             screen.blit(progress_text, (bar_x + 20, bar_y + 5))
             
             # 現在の対戦番号を進捗バーの右側に表示
@@ -619,36 +708,43 @@ def run_pretrain_mode(screen, font):
             if show_left_graphs:
                 progress_btn_rect = draw_learning_graphs(screen, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_avg_reward, qtable, show_learning_progress)
         else:
-            # 描画モードOFF: 進捗画面のみ表示
+            # 描画モードOFF: 進捗画面とグラフエリアを表示
             screen.fill((30, 60, 80))
             
-            # メインタイトル
-            title_text = font.render("AI事前学習中", True, (255, 255, 255))
-            screen.blit(title_text, (WINDOW_WIDTH//2 - title_text.get_width()//2, 50))
+            # 左側にグラフエリアを表示
+            if show_left_graphs:
+                progress_btn_rect = draw_learning_graphs(screen, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_avg_reward, qtable, show_learning_progress)
+            
+            # 右側に進捗情報を表示
+            # メインタイトル（自己対戦モード表示）
+            title_text = font.render("AI自己対戦学習中", True, (255, 255, 255))
+            title_x = GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50 + (WINDOW_WIDTH - (GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50) - title_text.get_width()) // 2
+            screen.blit(title_text, (title_x, 50))
             
             # 現在の対戦番号を大きく表示
             battle_text = font.render(f"第{pretrain_now + 1}戦 / {pretrain_total}戦", True, (255, 255, 255))
-            screen.blit(battle_text, (WINDOW_WIDTH//2 - battle_text.get_width()//2, 100))
+            battle_x = GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50 + (WINDOW_WIDTH - (GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50) - battle_text.get_width()) // 2
+            screen.blit(battle_text, (battle_x, 100))
             
             # 進捗バー
             progress = pretrain_now / pretrain_total
-            bar_w = 600
+            bar_w = 500  # バーの幅を少し小さく
             bar_h = 40
-            bar_x = (WINDOW_WIDTH - bar_w) // 2
+            bar_x = WINDOW_WIDTH - bar_w - 20  # 右端から20px内側
             bar_y = WINDOW_HEIGHT // 2 - 60
             pygame.draw.rect(screen, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h))
             pygame.draw.rect(screen, (100, 200, 100), (bar_x, bar_y, int(bar_w*progress), bar_h))
             pygame.draw.rect(screen, (100, 100, 100), (bar_x, bar_y, bar_w, bar_h), 3)
             
-            # 進捗テキスト
-            progress_text = font.render(f"訓練進捗: {pretrain_now}/{pretrain_total}", True, (255, 255, 255))
+            # 進捗テキスト（自己対戦モード表示）
+            progress_text = font.render(f"自己対戦訓練進捗: {pretrain_now}/{pretrain_total}", True, (255, 255, 255))
             screen.blit(progress_text, (bar_x + 20, bar_y - 50))
             
             # 統計情報
             stats_font = get_japanese_font(20)
             stats_y = bar_y + 120
             
-            # 勝敗統計
+            # 勝敗統計（自己対戦特有の表示）
             win_rate = 0
             if win_black + win_white > 0:
                 win_rate = (win_white / (win_black + win_white)) * 100
@@ -656,17 +752,19 @@ def run_pretrain_mode(screen, font):
             stats_text1 = stats_font.render(f"AI（白）勝利: {win_white}回", True, (255, 255, 255))
             stats_text2 = stats_font.render(f"AI（黒）勝利: {win_black}回", True, (255, 255, 255))
             stats_text3 = stats_font.render(f"AI（白）勝率: {win_rate:.1f}%", True, (255, 255, 255))
+            stats_text4 = stats_font.render("※同じAI同士の対戦", True, (200, 200, 200))
             
             screen.blit(stats_text1, (bar_x + 20, stats_y))
             screen.blit(stats_text2, (bar_x + 20, stats_y + 30))
             screen.blit(stats_text3, (bar_x + 20, stats_y + 60))
+            screen.blit(stats_text4, (bar_x + 20, stats_y + 90))
             
             # 学習統計
             if ai_learn_count > 0:
                 avg_reward_text = stats_font.render(f"平均報酬: {ai_avg_reward:.1f}", True, (255, 255, 255))
                 qtable_text = stats_font.render(f"Qテーブルサイズ: {len(qtable)}", True, (255, 255, 255))
-                screen.blit(avg_reward_text, (bar_x + 20, stats_y + 90))
-                screen.blit(qtable_text, (bar_x + 20, stats_y + 120))
+                screen.blit(avg_reward_text, (bar_x + 20, stats_y + 120))
+                screen.blit(qtable_text, (bar_x + 20, stats_y + 150))
         
         pygame.display.flip()
         clock.tick(30)  # フレームレートを30FPSに下げて描画を安定化
@@ -694,13 +792,50 @@ def run_pretrain_mode(screen, font):
             valid_moves = game.get_valid_moves(game.current_player)
             if valid_moves:
                 try:
+                    # --- AI同士の自己対戦モード ---
                     if game.current_player == PLAYER_WHITE:
-                        game.ai_qlearning_move(qtable, learn=True, player=PLAYER_WHITE)
+                        # 白（メインAI）: Q学習で学習
+                        result = game.ai_qlearning_move(qtable, learn=True, player=PLAYER_WHITE, ai_learn_count=ai_learn_count)
+                        if result:  # 手を打った場合
+                            reward = game.ai_last_reward
+                            ai_learn_count += 1
+                            ai_total_reward += reward
+                            ai_avg_reward = ai_total_reward / ai_learn_count if ai_learn_count > 0 else 0
+                            # デバッグ出力
+                            if DEBUG_MODE:
+                                print(f"白の手: 報酬={reward}, 累積報酬={ai_total_reward}, 平均報酬={ai_avg_reward:.2f}, 学習回数={ai_learn_count}")
+                        game.switch_player()
                     else:
-                        action = random.choice(valid_moves)
-                        r, c = action
-                        game.make_move(r, c, PLAYER_BLACK)
-                    game.switch_player()
+                        # 黒（同じAI）: 同じQテーブルを使用して学習
+                        # より戦略的な行動を取るため、ε値を調整
+                        if random.random() < 0.1:  # 10%の確率でランダム行動
+                            action = random.choice(valid_moves)
+                        else:
+                            # Q学習で最適な手を選択
+                            state_key = game.get_board_state_key()
+                            best_move = None
+                            best_q_value = float('-inf')
+                            valid_moves_list = list(valid_moves) if valid_moves else []
+                            for move in valid_moves_list:
+                                action_key = f"{state_key}_{move[0]}_{move[1]}"
+                                q_value = qtable.get(action_key, 0.0)
+                                if q_value > best_q_value:
+                                    best_q_value = q_value
+                                    best_move = move
+                            action = best_move if best_move is not None else random.choice(valid_moves)
+                        
+                        # 黒も実際に手を打って学習する（自己対戦のため）
+                        result = game.ai_qlearning_move(qtable, learn=True, player=PLAYER_BLACK, ai_learn_count=ai_learn_count)
+                        if result:  # 手を打った場合
+                            reward = game.ai_last_reward
+                            ai_learn_count += 1
+                            ai_total_reward += reward
+                            ai_avg_reward = ai_total_reward / ai_learn_count if ai_learn_count > 0 else 0
+                            # デバッグ出力
+                            if DEBUG_MODE:
+                                print(f"黒の手: 報酬={reward}, 累積報酬={ai_total_reward}, 平均報酬={ai_avg_reward:.2f}, 学習回数={ai_learn_count}")
+                        game.switch_player()
+                    
                     game.check_game_over()
                     game_move_count += 1
                     
@@ -708,11 +843,11 @@ def run_pretrain_mode(screen, font):
                     if draw_mode:
                         screen.fill(WHITE)
                         
-                        # 進捗バーを上部に表示
+                        # 進捗バーを上部右側に表示（グラフエリアと重ならないように）
                         progress = pretrain_now / pretrain_total
-                        bar_w = 600
+                        bar_w = 500  # バーの幅を少し小さく
                         bar_h = 30
-                        bar_x = (WINDOW_WIDTH - bar_w) // 2
+                        bar_x = WINDOW_WIDTH - bar_w - 20  # 右端から20px内側
                         bar_y = 20
                         pygame.draw.rect(screen, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h))
                         pygame.draw.rect(screen, (100, 200, 100), (bar_x, bar_y, int(bar_w*progress), bar_h))
@@ -745,20 +880,28 @@ def run_pretrain_mode(screen, font):
                         clock.tick(30)
                     # 描画モードOFFの場合は10手ごとに進捗更新
                     elif not fast_mode and game_move_count % 10 == 0:
-                        # 現在のゲーム状況を簡易表示
+                        # 現在のゲーム状況を簡易表示（グラフエリア付き）
                         screen.fill((30, 60, 80))
-                        title_text = font.render("AI事前学習中", True, (255, 255, 255))
-                        screen.blit(title_text, (WINDOW_WIDTH//2 - title_text.get_width()//2, 50))
+                        
+                        # 左側にグラフエリアを表示
+                        if show_left_graphs:
+                            progress_btn_rect = draw_learning_graphs(screen, learning_history, game_count, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_avg_reward, qtable, show_learning_progress)
+                        
+                        # 右側に進捗情報を表示
+                        title_text = font.render("AI自己対戦学習中", True, (255, 255, 255))
+                        title_x = GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50 + (WINDOW_WIDTH - (GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50) - title_text.get_width()) // 2
+                        screen.blit(title_text, (title_x, 50))
                         
                         # 現在の対戦番号を大きく表示
                         battle_text = font.render(f"第{pretrain_now + 1}戦 / {pretrain_total}戦", True, (255, 255, 255))
-                        screen.blit(battle_text, (WINDOW_WIDTH//2 - battle_text.get_width()//2, 100))
+                        battle_x = GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50 + (WINDOW_WIDTH - (GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50) - battle_text.get_width()) // 2
+                        screen.blit(battle_text, (battle_x, 100))
                         
                         # 進捗バー
                         progress = pretrain_now / pretrain_total
-                        bar_w = 600
+                        bar_w = 500  # バーの幅を少し小さく
                         bar_h = 40
-                        bar_x = (WINDOW_WIDTH - bar_w) // 2
+                        bar_x = WINDOW_WIDTH - bar_w - 20  # 右端から20px内側
                         bar_y = WINDOW_HEIGHT // 2 - 60
                         pygame.draw.rect(screen, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h))
                         pygame.draw.rect(screen, (100, 200, 100), (bar_x, bar_y, int(bar_w*progress), bar_h))
@@ -790,14 +933,38 @@ def run_pretrain_mode(screen, font):
             win_black += 1
             ai_draw_count += 1
         
-        # 学習統計更新
+        # 学習統計更新（改善版）
         update_learning_stats()
         
-        # 履歴記録
+        # より詳細な学習履歴記録
         learning_history.add_record(
-            game_count, ai_learn_count, ai_win_count, ai_lose_count, 
-            ai_draw_count, ai_total_reward, ai_avg_reward, len(qtable), black_score, white_score
+            pretrain_now, ai_learn_count, ai_win_count, ai_lose_count, 
+            ai_draw_count, ai_total_reward, ai_avg_reward, len(qtable), black_score, white_score, "ai_vs_ai"
         )
+        
+        # デバッグ出力：学習履歴記録時の情報
+        if DEBUG_MODE:
+            print(f"学習履歴記録: 対戦{pretrain_now}, 学習回数={ai_learn_count}, 累積報酬={ai_total_reward:.2f}, 平均報酬={ai_avg_reward:.2f}, Qテーブルサイズ={len(qtable)}")
+        
+        # 学習進捗の詳細ログ（デバッグ用）
+        if DEBUG_MODE:
+            print(f"第{pretrain_now}戦完了（自己対戦）:")
+            print(f"  結果: 黒{black_score} - 白{white_score}")
+            print(f"  AI勝率: {(win_white / (win_black + win_white)) * 100:.1f}%")
+            print(f"  Qテーブルサイズ: {len(qtable)}")
+            print(f"  平均報酬: {ai_avg_reward:.2f}")
+            print(f"  学習回数: {ai_learn_count}")
+        
+        # 自己対戦特有の統計情報
+        if pretrain_now % 10 == 0:  # 10戦ごとに詳細統計
+            print(f"\n=== 自己対戦学習進捗（第{pretrain_now}戦） ===")
+            print(f"総対戦数: {pretrain_now}")
+            print(f"AI（白）勝利: {win_white}回")
+            print(f"AI（黒）勝利: {win_black}回")
+            print(f"勝率: {(win_white / (win_black + win_white)) * 100:.1f}%")
+            print(f"Qテーブルサイズ: {len(qtable)}")
+            print(f"平均報酬: {ai_avg_reward:.2f}")
+            print("=" * 40)
         
         pretrain_now += 1
         game_count += 1
@@ -829,7 +996,9 @@ def run_pretrain_mode(screen, font):
     return MODE_HUMAN_TRAIN
 
 def draw_battle_history_screen(screen, font):
-    draw_battle_history_list(screen, learning_history, font)
+    """対戦記録・詳細分析画面を描画"""
+    from ui_components import draw_battle_history_screen as draw_battle_history_ui
+    draw_battle_history_ui(screen, font)
 
 if __name__ == "__main__":
     main_loop() 
