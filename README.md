@@ -29,16 +29,7 @@ pip install pandas openai python-dotenv flask
 
 ### 2. OpenAI APIキーの安全な設定
 
-#### 方法1: 環境変数を使用（推奨）
-
-**Windows PowerShellの場合：**
-```powershell
-# 一時的な設定（現在のセッションのみ）
-$env:OPENAI_API_KEY="your-api-key-here"
-
-# 永続的な設定（ユーザー環境変数）
-[Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "your-api-key-here", "User")
-```
+#### 方法1: 環境変数を使用
 
 **Windows コマンドプロンプトの場合：**
 ```cmd
@@ -47,16 +38,6 @@ set OPENAI_API_KEY=your-api-key-here
 
 # 永続的な設定
 setx OPENAI_API_KEY "your-api-key-here"
-```
-
-**Linux/Macの場合：**
-```bash
-# 一時的な設定
-export OPENAI_API_KEY="your-api-key-here"
-
-# 永続的な設定（~/.bashrcまたは~/.zshrcに追加）
-echo 'export OPENAI_API_KEY="your-api-key-here"' >> ~/.bashrc
-source ~/.bashrc
 ```
 
 #### 方法2: .envファイルを使用（推奨）
@@ -72,9 +53,9 @@ OPENAI_API_KEY=your-api-key-here
 *.env
 ```
 
-#### 方法3: コード内で直接設定（非推奨）
+#### 方法3: コード内で直接設定
 
-セキュリティ上の理由から推奨されませんが、テスト目的で使用する場合：
+セキュリティ上の理由から推奨されませんが、テスト目的で使用しています:
 ```python
 api_key = "your-api-key-here"
 ```
