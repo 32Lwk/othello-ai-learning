@@ -1673,23 +1673,21 @@ def draw_ai_battle_progress_graphs(screen, learning_history, current_game, total
     # 学習進捗がONの場合の詳細表示
     content_y = graph_area_y + 50
     content_height = graph_area_height - 60
-    section_height = content_height // 4
+    section_height = content_height // 6  # 6分割
+    section_spacing = 15
     
     # 1. ゲーム進捗グラフ
     draw_game_progress_mini_graph(screen, current_game, total_games, 
-                                 graph_area_x + 10, content_y, graph_area_width - 20, section_height - 10)
-    
+                                 graph_area_x + 4, content_y, graph_area_width - 14, section_height - 9)
     # 2. 勝率グラフ
     draw_win_rate_mini_graph(screen, ai_win_count, ai_lose_count, ai_draw_count,
-                            graph_area_x + 10, content_y + section_height, graph_area_width - 20, section_height - 10)
-    
-    # 3. 学習回数グラフ
+                            graph_area_x + 4, content_y + section_height + section_spacing, graph_area_width - 14, section_height - 9)
+    # 3. 学習回数グラフ（高さ1.5倍）
     draw_learn_count_mini_graph(screen, ai_learn_count, current_game,
-                               graph_area_x + 10, content_y + section_height * 2, graph_area_width - 20, section_height - 10)
-    
-    # 4. Qテーブル成長グラフ
+                               graph_area_x + 4, content_y + (section_height + section_spacing) * 2, graph_area_width - 14, int((section_height - 9) * 1.5))
+    # 4. Qテーブル成長グラフ（高さ1.5倍）
     draw_qtable_mini_graph(screen, len(qtable), current_game,
-                          graph_area_x + 10, content_y + section_height * 3, graph_area_width - 20, section_height - 10)
+                          graph_area_x + 4, content_y + (section_height + section_spacing) * 2 + int((section_height - 9) * 1.5) + section_spacing, graph_area_width - 14, int((section_height - 9) * 1.5))
     
     return progress_btn_rect
 
@@ -1764,68 +1762,135 @@ def draw_win_rate_mini_graph(screen, ai_win_count, ai_lose_count, ai_draw_count,
     screen.blit(text_surface, (x, y + height - 15))
 
 def draw_learn_count_mini_graph(screen, ai_learn_count, current_game, x, y, width, height):
-    """学習回数のミニグラフ"""
+    """学習回数のミニグラフ（見やすさ改善版）"""
     # タイトル
-    title_font = get_japanese_font(12)
-    title_surface = title_font.render("⚡ 学習回数", True, (50, 50, 50))
+    title_font = get_japanese_font(13)  # フォントサイズを大きく
+    title_surface = title_font.render("⚡ 学習回数", True, (30, 30, 30))  # 色を濃く
     screen.blit(title_surface, (x, y))
-    
+
     # 学習効率の計算
     learn_per_game = ai_learn_count / current_game if current_game > 0 else 0
+
+    # 折れ線グラフ風の表示（Qテーブル成長グラフと同様のスタイル）
+    graph_y = y + 22  # タイトル下の余白を少し増やす
+    graph_width = width - 25  # 余白を少し増やす
+    graph_height = height - 40  # 余白を少し増やす
+    graph_x = x + 12
+
+    # 背景（より濃い色でコントラスト向上）
+    pygame.draw.rect(screen, (240, 240, 245), (graph_x, graph_y, graph_width, graph_height))
+    pygame.draw.rect(screen, (180, 180, 180), (graph_x, graph_y, graph_width, graph_height), 2)
+
+    # 目盛り（縦軸：学習回数）- フォントサイズを大きく
+    tick_font = get_japanese_font(10)  # 9px → 10px
+    max_learn = max(ai_learn_count, 100)
+    for i in range(5):
+        tick_y = graph_y + (i * graph_height // 4)
+        pygame.draw.line(screen, (210, 210, 210), (graph_x, tick_y), (graph_x + graph_width, tick_y), 1)
+        tick_val = max_learn - (i * max_learn // 4)
+        tick_label = tick_font.render(f"{int(tick_val)}", True, (100, 100, 100))  # 色を濃く
+        screen.blit(tick_label, (graph_x - 32, tick_y - 8))  # 位置調整
+
+    # 横軸（ゲーム数）- フォントサイズを大きく
+    if current_game > 1:
+        for i in range(5):
+            tick_x = graph_x + (i * graph_width // 4)
+            pygame.draw.line(screen, (210, 210, 210), (tick_x, graph_y), (tick_x, graph_y + graph_height), 1)
+            tick_val = int(i * current_game // 4)
+            tick_label = tick_font.render(f"{tick_val}", True, (100, 100, 100))  # 色を濃く
+            screen.blit(tick_label, (tick_x - 10, graph_y + graph_height + 1))  # 位置調整
+
+    # 学習回数のライン（色を鮮明に、線を太く）
+    if ai_learn_count > 0 and current_game > 1:
+        # 直線（最初から現在まで）- 緑色で鮮明に
+        start_x = graph_x
+        end_x = graph_x + graph_width
+        start_y = graph_y + graph_height
+        end_y = graph_y + graph_height - (ai_learn_count / max_learn) * graph_height
+        
+        # グラデーション効果（線の太さを3pxに）
+        for i in range(3):
+            offset = i - 1
+            line_color = (60, 200 + i*20, 60 + i*10)  # 緑系グラデーション
+            pygame.draw.line(screen, line_color, 
+                           (start_x + offset, start_y + offset), 
+                           (end_x + offset, end_y + offset), 1)
+
     
-    # 棒グラフ風の表示
-    bar_y = y + 20
-    bar_width = width - 20
-    bar_height = height - 40
-    
-    # 背景
-    pygame.draw.rect(screen, (220, 220, 220), (x + 10, bar_y, bar_width, bar_height))
-    pygame.draw.rect(screen, (150, 150, 150), (x + 10, bar_y, bar_width, bar_height), 1)
-    
-    # 学習回数の棒
-    if ai_learn_count > 0:
-        max_learn = max(ai_learn_count, 100)  # 最小スケール
-        learn_height = min(bar_height, (ai_learn_count / max_learn) * bar_height)
-        learn_rect = pygame.Rect(x + 10, bar_y + bar_height - learn_height, bar_width, learn_height)
-        pygame.draw.rect(screen, (255, 150, 100), learn_rect)
-    
-    # テキスト
-    text_font = get_japanese_font(10)
+    # 横軸ラベル（フォントサイズを大きく）
+    x_label_font = get_japanese_font(10)  # 9px → 10px
+    x_label = x_label_font.render("ゲーム数", True, (60, 60, 60))  # 色を濃く
+    screen.blit(x_label, (graph_x + graph_width//2 - x_label.get_width()//2, graph_y + graph_height + 13))
+
+    # テキスト（フォントサイズを大きく）
+    text_font = get_japanese_font(11)  # 10px → 11px
     text = f"総学習: {ai_learn_count}回 (1ゲームあたり: {learn_per_game:.1f})"
-    text_surface = text_font.render(text, True, (50, 50, 50))
-    screen.blit(text_surface, (x, y + height - 15))
+    text_surface = text_font.render(text, True, (30, 30, 30))  # 色を濃く
+    screen.blit(text_surface, (x, y + height - 18))
 
 def draw_qtable_mini_graph(screen, qtable_size, current_game, x, y, width, height):
-    """Qテーブル成長のミニグラフ"""
+    """Qテーブル成長のミニグラフ（見やすさ改善版）"""
     # タイトル
-    title_font = get_japanese_font(12)
-    title_surface = title_font.render("🧠 Qテーブル", True, (50, 50, 50))
+    title_font = get_japanese_font(13)  # フォントサイズを大きく
+    title_surface = title_font.render("🧠 Qテーブル成長", True, (30, 30, 30))  # 色を濃く
     screen.blit(title_surface, (x, y))
     
     # 成長率の計算
     growth_per_game = qtable_size / current_game if current_game > 0 else 0
     
     # 折れ線グラフ風の表示
-    graph_y = y + 20
-    graph_width = width - 20
-    graph_height = height - 40
-    
-    # 背景
-    pygame.draw.rect(screen, (220, 220, 220), (x + 10, graph_y, graph_width, graph_height))
-    pygame.draw.rect(screen, (150, 150, 150), (x + 10, graph_y, graph_width, graph_height), 1)
-    
-    # 成長ライン
-    if qtable_size > 0:
-        # 簡易的な成長ライン（直線）
-        start_x = x + 10
-        end_x = x + 10 + graph_width
+    graph_y = y + 22  # タイトル下の余白を少し増やす
+    graph_width = width - 25  # 余白を少し増やす
+    graph_height = height - 40  # 余白を少し増やす
+    graph_x = x + 12
+
+    # 背景（より濃い色でコントラスト向上）
+    pygame.draw.rect(screen, (240, 240, 245), (graph_x, graph_y, graph_width, graph_height))
+    pygame.draw.rect(screen, (180, 180, 180), (graph_x, graph_y, graph_width, graph_height), 2)
+
+    # 目盛り（縦軸：Qテーブルサイズ）- フォントサイズを大きく
+    tick_font = get_japanese_font(1)  # 0px
+    max_size = max(qtable_size, 100)
+    for i in range(5):
+        tick_y = graph_y + (i * graph_height // 4)
+        pygame.draw.line(screen, (210, 210, 210), (graph_x, tick_y), (graph_x + graph_width, tick_y), 1)
+        tick_val = max_size - (i * max_size // 4)
+        tick_label = tick_font.render(f"{int(tick_val)}", True, (100, 100, 100))  # 色を濃く
+        screen.blit(tick_label, (graph_x - 32, tick_y - 8))  # 位置調整
+
+    # 横軸（ゲーム数）- フォントサイズを大きく
+    if current_game > 1:
+        for i in range(5):
+            tick_x = graph_x + (i * graph_width // 4)
+            pygame.draw.line(screen, (210, 210, 210), (tick_x, graph_y), (tick_x, graph_y + graph_height), 1)
+            tick_val = int(i * current_game // 4)
+            tick_label = tick_font.render(f"{tick_val}", True, (100, 100, 100))  # 色を濃く
+            screen.blit(tick_label, (tick_x - 10, graph_y + graph_height + 3))  # 位置調整
+
+    # 成長ライン（色を鮮明に、線を太く）
+    if qtable_size > 0 and current_game > 1:
+        # 直線（最初から現在まで）- オレンジ色で鮮明に
+        start_x = graph_x
+        end_x = graph_x + graph_width
         start_y = graph_y + graph_height
-        end_y = graph_y + graph_height - (qtable_size / 10000) * graph_height  # スケール調整
+        end_y = graph_y + graph_height - (qtable_size / max_size) * graph_height
         
-        pygame.draw.line(screen, (100, 100, 255), (start_x, start_y), (end_x, end_y), 2)
+        # グラデーション効果（線の太さを2pxに）
+        for i in range(2):
+            offset = i - 1.5
+            line_color = (255, 140, 60)
+            pygame.draw.line(screen, line_color, 
+                           (start_x + offset, start_y + offset), 
+                           (end_x + offset, end_y + offset), 1)
+
     
-    # テキスト
-    text_font = get_japanese_font(10)
+    # 横軸ラベル（フォントサイズを大きく）
+    x_label_font = get_japanese_font(9)  # 9px
+    x_label = x_label_font.render("ゲーム数", True, (60, 60, 60))  # 色を濃く
+    screen.blit(x_label, (graph_x + graph_width//2 - x_label.get_width()//2, graph_y + graph_height + 18))
+
+    # テキスト（フォントサイズを大きく）
+    text_font = get_japanese_font(9)  # 10px
     text = f"サイズ: {qtable_size} (成長率: {growth_per_game:.1f}/ゲーム)"
-    text_surface = text_font.render(text, True, (50, 50, 50))
-    screen.blit(text_surface, (x, y + height - 15))
+    text_surface = text_font.render(text, True, (30, 30, 30))  # 色を濃く
+    screen.blit(text_surface, (x, y + height - 20))

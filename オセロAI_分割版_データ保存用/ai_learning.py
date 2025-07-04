@@ -215,17 +215,22 @@ class LearningLogger:
 # Qテーブルの保存・読み込み
 
 def save_qtable(qtable):
+    """Qテーブルを保存 - othello-ai-learning参考版"""
     try:
         with open(QTABLE_PATH, "wb") as f:
             pickle.dump(qtable, f)
+        print(f"Qテーブルを保存しました: {len(qtable)}エントリ")
     except Exception as e:
         print(f"Qテーブルの保存エラー: {e}")
 
 def load_qtable():
+    """Qテーブルを読み込み - othello-ai-learning参考版"""
     try:
         if os.path.exists(QTABLE_PATH):
             with open(QTABLE_PATH, "rb") as f:
-                return pickle.load(f)
+                qtable = pickle.load(f)
+                print(f"Qテーブルを読み込みました: {len(qtable)}エントリ")
+                return qtable
     except Exception as e:
         print(f"Qテーブルの読み込みエラー: {e}")
     return {}
@@ -1127,7 +1132,7 @@ def show_save_error_message(screen, font, error_message):
                 return
 
 def get_japanese_font(size):
-    """日本語フォントを取得"""
+    """日本語フォントを取得 - othello-ai-learning参考版"""
     try:
         return pygame.font.Font("C:/Windows/Fonts/meiryo.ttc", size)
     except:
@@ -1281,7 +1286,7 @@ def analyze_learning_progress(ai_learn_count, ai_win_count, ai_lose_count, ai_dr
 
 def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=False, screen=None, font=None):
     """
-    強化版AI同士の自己対戦（より効率的な学習）- 修正版
+    強化版AI同士の自己対戦（より効率的な学習）- othello-ai-learning参考版
     描画ON/OFF対応
     """
     ai_learn_count = 0
@@ -1289,13 +1294,26 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
     ai_lose_count = 0
     ai_draw_count = 0
     ai_total_reward = 0
+    win_black = 0
+    win_white = 0
     
     print(f"🤖 強化版AI自己対戦開始: {num_games}ゲーム")
+    
+    # 事前学習開始メッセージ
+    if screen is not None and font is not None:
+        screen.fill((30, 60, 80))
+        start_text = font.render("事前学習を開始します", True, (255, 255, 255))
+        screen.blit(start_text, (screen.get_width()//2 - start_text.get_width()//2, screen.get_height()//2 - 60))
+        info_text = get_japanese_font(24).render(f"訓練回数: {num_games}", True, (255, 255, 255))
+        screen.blit(info_text, (screen.get_width()//2 - info_text.get_width()//2, screen.get_height()//2 - 20))
+        pygame.display.flip()
+        pygame.time.wait(1500)
     
     for game_num in range(num_games):
         game.reset_game()
         game_reward = 0
         moves_in_game = 0
+        max_moves = 200  # 最大手数制限
         
         # --- 盤面描画ON ---
         if draw_mode and screen is not None and font is not None:
@@ -1316,12 +1334,12 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
             # 現在のプレイヤー表示
             draw_current_player_indicator(screen, game.current_player)
             # 進捗バー（盤面の下）
-            draw_progress_bar(screen, game_num + 1, num_games, BOARD_OFFSET_X, BOARD_OFFSET_Y + BOARD_PIXEL_SIZE + 20, 200, 30)
+            # draw_progress_bar(screen, game_num + 1, num_games, BOARD_OFFSET_X, BOARD_OFFSET_Y + BOARD_PIXEL_SIZE + 20, 200, 30)
             # 勝敗・手数
             info_font = get_japanese_font(22)
             info = [
                 f"対戦 {game_num + 1} / {num_games}",
-                f"黒AI: {ai_win_count}勝　白AI: {ai_lose_count}勝　引き分け: {ai_draw_count}",
+                f"黒AI: {win_black}勝　白AI: {win_white}勝　引き分け: {ai_draw_count}",
             ]
             for i, line in enumerate(info):
                 surface = info_font.render(line, True, (0,0,0))
@@ -1333,35 +1351,79 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
             pygame.time.wait(500)  # ゲーム開始を500ms表示
         # --- 盤面描画OFF ---
         elif not draw_mode and screen is not None and font is not None:
-            screen.fill((255,255,255))
-            # タイトル
-            title_font = get_japanese_font(40)
-            title_surface = title_font.render("AI同士の訓練中", True, (0, 0, 0))
-            screen.blit(title_surface, (screen.get_width()//2 - title_surface.get_width()//2, 60))
-            # 進捗バー
-            progress = (game_num + 1) / num_games
-            bar_rect = pygame.Rect(screen.get_width()//2-150, 130, 300, 40)
-            pygame.draw.rect(screen, (200, 200, 200), bar_rect)
-            pygame.draw.rect(screen, (100, 200, 100), (bar_rect.x, bar_rect.y, int(bar_rect.width*progress), bar_rect.height))
-            # 対戦数・勝敗
-            info_font = get_japanese_font(28)
-            info = [
-                f"対戦 {game_num + 1} / {num_games}",
-                f"黒AI: {ai_win_count}勝　白AI: {ai_lose_count}勝　引き分け: {ai_draw_count}",
-            ]
-            for i, line in enumerate(info):
-                surface = info_font.render(line, True, (0,0,0))
-                screen.blit(surface, (screen.get_width()//2 - surface.get_width()//2, 190 + i*40))
-            # グラフや統計
+            screen.fill((30, 60, 80))
+            
+            # 左側にグラフエリアを表示
             draw_ai_battle_progress_graphs(
                 screen, None, game_num + 1, num_games, ai_learn_count, 
                 ai_win_count, ai_lose_count, ai_draw_count, 0, qtable, True
             )
+            
+            # 右側に進捗情報を表示
+            # メインタイトル（自己対戦モード表示）
+            title_text = font.render("AI自己対戦学習中", True, (255, 255, 255))
+            title_x = GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50 + (screen.get_width() - (GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50) - title_text.get_width()) // 2
+            screen.blit(title_text, (title_x, 50))
+            
+            # 現在の対戦番号を大きく表示
+            battle_text = font.render(f"第{game_num + 1}戦 / {num_games}戦", True, (255, 255, 255))
+            battle_x = GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50 + (screen.get_width() - (GRAPH_OFFSET_X + GRAPH_AREA_WIDTH + 50) - battle_text.get_width()) // 2
+            screen.blit(battle_text, (battle_x, 100))
+            
+            # 進捗バー
+            progress = (game_num + 1) / num_games
+            bar_w = 500  # バーの幅を少し小さく
+            bar_h = 40
+            bar_x = screen.get_width() - bar_w - 20  # 右端から20px内側
+            bar_y = screen.get_height() // 2 - 60
+            pygame.draw.rect(screen, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h))
+            pygame.draw.rect(screen, (100, 200, 100), (bar_x, bar_y, int(bar_w*progress), bar_h))
+            pygame.draw.rect(screen, (100, 100, 100), (bar_x, bar_y, bar_w, bar_h), 3)
+            
+            # 進捗テキスト（自己対戦モード表示）
+            progress_text = font.render(f"自己対戦訓練進捗: {game_num + 1}/{num_games}", True, (255, 255, 255))
+            screen.blit(progress_text, (bar_x + 20, bar_y - 50))
+            
+            # 統計情報
+            stats_font = get_japanese_font(20)
+            stats_y = bar_y + 120
+            
+            # 勝敗統計（自己対戦特有の表示）
+            win_rate = 0
+            if win_black + win_white > 0:
+                win_rate = (win_white / (win_black + win_white)) * 100
+            
+            stats_text1 = stats_font.render(f"AI（白）勝利: {win_white}回", True, (255, 255, 255))
+            stats_text2 = stats_font.render(f"AI（黒）勝利: {win_black}回", True, (255, 255, 255))
+            stats_text3 = stats_font.render(f"AI（白）勝率: {win_rate:.1f}%", True, (255, 255, 255))
+            stats_text4 = stats_font.render("※同じAI同士の対戦", True, (200, 200, 200))
+            
+            screen.blit(stats_text1, (bar_x + 20, stats_y))
+            screen.blit(stats_text2, (bar_x + 20, stats_y + 30))
+            screen.blit(stats_text3, (bar_x + 20, stats_y + 60))
+            screen.blit(stats_text4, (bar_x + 20, stats_y + 90))
+            
+            # 学習統計
+            if ai_learn_count > 0:
+                avg_reward = ai_total_reward / ai_learn_count
+                avg_reward_text = stats_font.render(f"平均報酬: {avg_reward:.1f}", True, (255, 255, 255))
+                qtable_text = stats_font.render(f"Qテーブルサイズ: {len(qtable)}", True, (255, 255, 255))
+                screen.blit(avg_reward_text, (bar_x + 20, stats_y + 120))
+                screen.blit(qtable_text, (bar_x + 20, stats_y + 150))
+            
             pygame.display.flip()
             pygame.event.pump()
             pygame.time.wait(200)  # 進捗だけなので短め
         
-        while not game.game_over:
+        while not game.game_over and moves_in_game < max_moves:
+            # イベント処理を追加して固まるのを防ぐ
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, 0
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        return ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, 0
+            
             current_player = game.current_player
             valid_moves = game.get_valid_moves(current_player)
             
@@ -1376,13 +1438,52 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
                     pygame.time.wait(300)
                 continue
             
-            # AIの手を決定
-            success, reward = ai_qlearning_move(game, qtable, learn, current_player, ai_learn_count)
-            
-            if success:
-                ai_learn_count += 1
-                game_reward += reward
-                moves_in_game += 1
+            # AIの手を決定（othello-ai-learningの方式を参考）
+            try:
+                if current_player == PLAYER_WHITE:
+                    # 白（メインAI）: Q学習で学習
+                    success, reward = ai_qlearning_move(game, qtable, learn=True, player=PLAYER_WHITE, ai_learn_count=ai_learn_count)
+                    if success:  # 手を打った場合
+                        ai_learn_count += 1
+                        ai_total_reward += reward
+                        game_reward += reward
+                        moves_in_game += 1
+                        # デバッグ出力
+                        if DEBUG_MODE:
+                            print(f"白の手: 報酬={reward}, 累積報酬={ai_total_reward}, 学習回数={ai_learn_count}")
+                    game.switch_player()
+                else:
+                    # 黒（同じAI）: 同じQテーブルを使用して学習
+                    # より戦略的な行動を取るため、ε値を調整
+                    if random.random() < 0.1:  # 10%の確率でランダム行動
+                        action = random.choice(valid_moves)
+                    else:
+                        # Q学習で最適な手を選択
+                        state_key = game.get_board_state_key()
+                        best_move = None
+                        best_q_value = float('-inf')
+                        valid_moves_list = list(valid_moves) if valid_moves else []
+                        for move in valid_moves_list:
+                            action_key = f"{state_key}_{move[0]}_{move[1]}"
+                            q_value = qtable.get(action_key, 0.0)
+                            if q_value > best_q_value:
+                                best_q_value = q_value
+                                best_move = move
+                        action = best_move if best_move is not None else random.choice(valid_moves)
+                    
+                    # 黒も実際に手を打って学習する（自己対戦のため）
+                    success, reward = ai_qlearning_move(game, qtable, learn=True, player=PLAYER_BLACK, ai_learn_count=ai_learn_count)
+                    if success:  # 手を打った場合
+                        ai_learn_count += 1
+                        ai_total_reward += reward
+                        game_reward += reward
+                        moves_in_game += 1
+                        # デバッグ出力
+                        if DEBUG_MODE:
+                            print(f"黒の手: 報酬={reward}, 累積報酬={ai_total_reward}, 学習回数={ai_learn_count}")
+                    game.switch_player()
+                
+                game.check_game_over()
                 
                 # 描画ONの場合のみ盤面・進捗を描画（更新頻度を調整）
                 if draw_mode and screen is not None and font is not None:
@@ -1399,7 +1500,7 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
                         black_score, white_score = game.get_score()
                         display_score(screen, black_score, white_score)
                         # 進捗バー描画
-                        draw_progress_bar(screen, game_num + 1, num_games, BOARD_OFFSET_X, BOARD_OFFSET_Y + BOARD_PIXEL_SIZE + 20, 200, 30)
+                        # draw_progress_bar(screen, game_num + 1, num_games, BOARD_OFFSET_X, BOARD_OFFSET_Y + BOARD_PIXEL_SIZE + 20, 200, 30)
                         draw_learn_count(screen, font, ai_learn_count)
                         draw_game_count(screen, font, game_num + 1)
                         # AI対戦進捗グラフを描画（リアルタイム更新）
@@ -1422,6 +1523,10 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
                 # 学習進捗の表示
                 if game_num % 10 == 0 and moves_in_game % 10 == 0:
                     print(f"  ゲーム {game_num+1}/{num_games}, 手数: {moves_in_game}, 累積学習: {ai_learn_count}")
+                    
+            except Exception as e:
+                print(f"ゲーム実行中にエラーが発生しました: {e}")
+                break
         
         # ゲーム終了時の画面表示
         if draw_mode and screen is not None and font is not None:
@@ -1444,7 +1549,7 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
             
             display_message(screen, result_msg, False)
             # 進捗バー描画
-            draw_progress_bar(screen, game_num + 1, num_games, BOARD_OFFSET_X, BOARD_OFFSET_Y + BOARD_PIXEL_SIZE + 20, 200, 30)
+            # draw_progress_bar(screen, game_num + 1, num_games, BOARD_OFFSET_X, BOARD_OFFSET_Y + BOARD_PIXEL_SIZE + 20, 200, 30)
             draw_learn_count(screen, font, ai_learn_count)
             draw_game_count(screen, font, game_num + 1)
             # AI対戦進捗グラフを描画（最終更新）
@@ -1463,13 +1568,16 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
             pygame.event.pump()
             pygame.time.wait(800)  # ゲーム結果を800ms表示
         
-        # ゲーム結果の処理（自己対戦用に修正）
+        # ゲーム結果の処理（othello-ai-learningの方式を参考）
         black_score, white_score = game.get_score()
         if black_score > white_score:
-            ai_win_count += 1
-        elif white_score > black_score:
+            win_black += 1
             ai_lose_count += 1
+        elif white_score > black_score:
+            win_white += 1
+            ai_win_count += 1
         else:
+            win_black += 1
             ai_draw_count += 1
         
         if game_num % 10 == 0 or game_num < 5:
@@ -1477,10 +1585,22 @@ def enhanced_ai_self_play(game, qtable, num_games=100, learn=True, draw_mode=Fal
         
         ai_total_reward += game_reward
         
-        if (game_num + 1) % 10 == 0:
-            win_rate = (ai_win_count / (game_num + 1)) * 100
-            avg_reward = ai_total_reward / ai_learn_count if ai_learn_count > 0 else 0
-            print(f"  📊 進捗: {game_num+1}/{num_games}, 勝率: {win_rate:.1f}%, 平均報酬: {avg_reward:.2f}")
+        # 自己対戦特有の統計情報（othello-ai-learningの方式を参考）
+        if game_num % 10 == 0:  # 10戦ごとに詳細統計
+            print(f"\n=== 自己対戦学習進捗（第{game_num + 1}戦） ===")
+            print(f"総対戦数: {game_num + 1}")
+            print(f"AI（白）勝利: {win_white}回")
+            print(f"AI（黒）勝利: {win_black}回")
+            print(f"勝率: {(win_white / (win_black + win_white)) * 100:.1f}%")
+            print(f"Qテーブルサイズ: {len(qtable)}")
+            print(f"平均報酬: {(ai_total_reward / ai_learn_count) if ai_learn_count > 0 else 0:.2f}")
+            print("=" * 40)
+        
+        # 学習統計更新（othello-ai-learningの方式を参考）
+        if ai_learn_count > 0:
+            ai_avg_reward = ai_total_reward / ai_learn_count
+        else:
+            ai_avg_reward = 0
     
     total_games = ai_win_count + ai_lose_count + ai_draw_count
     final_win_rate = (ai_win_count / total_games) * 100 if total_games > 0 else 0
