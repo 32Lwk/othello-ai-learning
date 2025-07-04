@@ -68,6 +68,9 @@ HISTORY_SAVE_INTERVAL = 10  # 何ゲームごとに履歴を保存するか
 MODE_HUMAN_TRAIN = 0  # 人間vsAIで学習
 MODE_AI_PRETRAIN = 1  # AI同士で訓練→人間vsAI
 
+# デバッグモード
+DEBUG_MODE = False  # デバッグ出力の有効/無効
+
 # Pygame初期化・フォント・画面サイズ
 pygame.init()
 screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))

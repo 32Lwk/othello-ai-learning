@@ -207,10 +207,17 @@ def main_loop():
                     pygame.time.Clock().tick(30)
                     continue
                 
-                # 通常のゲームモードの場合
+                # --- リセット・戻るボタンのクリック処理を最初に追加 ---
+                if draw_reset_button(screen, font, mouse_pos, mouse_down):
+                    game = OthelloGame()
+                    initialize_game_screen(game)
+                    continue
+                if draw_back_button(screen, font, mouse_pos, mouse_down):
+                    return  # main_loopを抜けてモード選択画面に戻る
+
                 # 盤面クリック時のみ人間の手番なら石を置く
-                # if game.current_player == PLAYER_BLACK and not show_new_game_message and not game.game_over:
-                #     handle_mouse_click(event.pos)  # 未定義のため一時的にコメントアウト
+                if game.current_player == PLAYER_BLACK and not show_new_game_message and not game.game_over:
+                    handle_mouse_click(event.pos)
                 # リセット・戻るボタン等の処理は従来通り
                 if show_new_game_message:
                     show_new_game_message = False
@@ -534,28 +541,32 @@ def mode_select_screen(screen, font):
         pygame.time.Clock().tick(60)
 
 def initialize_game_screen(game_obj):
-    """ゲーム画面の初期化"""
-    pass
+    """ゲーム画面の初期化（リセット時にも使用）"""
+    global move_count, last_move_count, ai_learn_count, ai_total_reward, ai_avg_reward, ai_win_count, ai_lose_count, ai_draw_count
+    global show_new_game_message
+    move_count = 0
+    last_move_count = 0
+    ai_learn_count = 0
+    ai_total_reward = 0
+    ai_avg_reward = 0
+    ai_win_count = 0
+    ai_lose_count = 0
+    ai_draw_count = 0
+    show_new_game_message = False
+    game_obj.reset_game()
 
 def execute_enhanced_learning(screen, font, num_games, mode_name):
-    """強化学習を実行"""
-    global qtable, learning_history, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward
-    
-    print(f"🚀 {mode_name}学習開始: {num_games}ゲーム")
-    
-    # 学習画面を表示
-    show_learning_progress_screen(screen, font, f"{mode_name}学習中...", "準備中...")
-    
-    # ゲームオブジェクトを作成
+    """強化学習モードの実行 - othello-ai-learning参考版"""
+    global qtable, learning_history, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, draw_mode
+    print(f"🚀 {mode_name}開始: {num_games}ゲーム")
+    show_learning_progress_screen(screen, font, f"{mode_name}中...", "準備中...")
     game = OthelloGame()
-    
-    # 強化学習を実行
     try:
         ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward = enhanced_ai_self_play(
-            game, qtable, num_games, learn=True
+            game, qtable, num_games, learn=True, draw_mode=draw_mode, screen=screen, font=font
         )
         
-        # 学習履歴に記録
+        # より詳細な学習履歴記録（othello-ai-learningの方式を参考）
         learning_history.add_record(
             game_count=num_games,
             ai_learn_count=ai_learn_count,
@@ -565,18 +576,37 @@ def execute_enhanced_learning(screen, font, num_games, mode_name):
             ai_total_reward=ai_total_reward,
             ai_avg_reward=ai_avg_reward,
             qtable_size=len(qtable),
-            game_type="ai_vs_ai"
+            black_score=0,
+            white_score=0,
+            game_type="enhanced_learning"
         )
         
-        # Qテーブルを保存
+        # デバッグ出力：学習履歴記録時の情報
+        if DEBUG_MODE:
+            print(f"学習履歴記録: {mode_name}, 学習回数={ai_learn_count}, 累積報酬={ai_total_reward:.2f}, 平均報酬={ai_avg_reward:.2f}, Qテーブルサイズ={len(qtable)}")
+        
+        # 学習進捗の詳細ログ（デバッグ用）
+        if DEBUG_MODE:
+            print(f"{mode_name}完了:")
+            print(f"  総対戦数: {num_games}")
+            print(f"  AI勝利: {ai_win_count}, AI敗北: {ai_lose_count}, 引き分け: {ai_draw_count}")
+            print(f"  Qテーブルサイズ: {len(qtable)}")
+            print(f"  平均報酬: {ai_avg_reward:.2f}")
+            print(f"  学習回数: {ai_learn_count}")
+        
         save_qtable(qtable)
-        
-        # 完了画面を表示
         show_learning_complete_screen(screen, font, mode_name, ai_win_count, ai_lose_count, ai_draw_count, ai_avg_reward)
-        
     except Exception as e:
-        print(f"❌ 学習エラー: {e}")
+        print(f"❌ {mode_name}エラー: {e}")
         show_learning_error_screen(screen, font, str(e))
+
+def update_learning_stats():
+    """学習統計を更新 - othello-ai-learning参考版"""
+    global ai_avg_reward
+    if ai_learn_count > 0:
+        ai_avg_reward = ai_total_reward / ai_learn_count
+    else:
+        ai_avg_reward = 0
 
 def execute_adaptive_learning(screen, font):
     """適応的学習を実行"""
@@ -1658,15 +1688,26 @@ def run_enhanced_learning_mode(screen, font):
     execute_enhanced_learning(screen, font, num_games, mode_name)
 
 def execute_pretrain_learning(screen, font, num_games):
-    """事前訓練（AI同士の自己対戦）を実行"""
+    """事前訓練（AI同士の自己対戦）を実行 - othello-ai-learning参考版"""
     global qtable, learning_history, ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward, draw_mode
     print(f"🤖 事前訓練開始: {num_games}ゲーム")
-    show_learning_progress_screen(screen, font, "事前訓練中...", "準備中...")
+    
+    # 事前学習開始メッセージ
+    screen.fill((30, 60, 80))
+    start_text = font.render("事前学習を開始します", True, (255, 255, 255))
+    screen.blit(start_text, (WINDOW_WIDTH//2 - start_text.get_width()//2, WINDOW_HEIGHT//2 - 60))
+    info_text = get_japanese_font(24).render(f"訓練回数: {num_games}", True, (255, 255, 255))
+    screen.blit(info_text, (WINDOW_WIDTH//2 - info_text.get_width()//2, WINDOW_HEIGHT//2 - 20))
+    pygame.display.flip()
+    pygame.time.wait(1500)
+    
     game = OthelloGame()
     try:
         ai_learn_count, ai_win_count, ai_lose_count, ai_draw_count, ai_total_reward, ai_avg_reward = enhanced_ai_self_play(
             game, qtable, num_games, learn=True, draw_mode=draw_mode, screen=screen, font=font
         )
+        
+        # より詳細な学習履歴記録（othello-ai-learningの方式を参考）
         learning_history.add_record(
             game_count=num_games,
             ai_learn_count=ai_learn_count,
@@ -1676,13 +1717,72 @@ def execute_pretrain_learning(screen, font, num_games):
             ai_total_reward=ai_total_reward,
             ai_avg_reward=ai_avg_reward,
             qtable_size=len(qtable),
+            black_score=0,  # 自己対戦のため個別スコアは記録しない
+            white_score=0,
             game_type="ai_vs_ai"
         )
+        
+        # デバッグ出力：学習履歴記録時の情報
+        if DEBUG_MODE:
+            print(f"学習履歴記録: 対戦{num_games}, 学習回数={ai_learn_count}, 累積報酬={ai_total_reward:.2f}, 平均報酬={ai_avg_reward:.2f}, Qテーブルサイズ={len(qtable)}")
+        
+        # 学習進捗の詳細ログ（デバッグ用）
+        if DEBUG_MODE:
+            print(f"事前訓練完了（自己対戦）:")
+            print(f"  総対戦数: {num_games}")
+            print(f"  AI勝利: {ai_win_count}, AI敗北: {ai_lose_count}, 引き分け: {ai_draw_count}")
+            print(f"  Qテーブルサイズ: {len(qtable)}")
+            print(f"  平均報酬: {ai_avg_reward:.2f}")
+            print(f"  学習回数: {ai_learn_count}")
+        
         save_qtable(qtable)
+        
+        # 終了メッセージ（othello-ai-learningの方式を参考）
+        screen.fill((30, 60, 80))
+        complete_text = font.render("事前学習が完了しました！", True, (255, 255, 255))
+        screen.blit(complete_text, (WINDOW_WIDTH//2 - complete_text.get_width()//2, WINDOW_HEIGHT//2 - 60))
+        
+        # 最終統計
+        total_games = ai_win_count + ai_lose_count + ai_draw_count
+        final_win_rate = (ai_win_count / total_games) * 100 if total_games > 0 else 0
+        
+        final_stats1 = get_japanese_font(24).render(f"最終勝率: {final_win_rate:.1f}%", True, (255, 255, 255))
+        final_stats3 = get_japanese_font(24).render(f"平均報酬: {ai_avg_reward:.2f}", True, (255, 255, 255))
+        
+        screen.blit(final_stats1, (WINDOW_WIDTH//2 - final_stats1.get_width()//2, WINDOW_HEIGHT//2 - 20))
+        screen.blit(final_stats3, (WINDOW_WIDTH//2 - final_stats3.get_width()//2, WINDOW_HEIGHT//2 + 20))
+        
+        pygame.display.flip()
+        pygame.time.wait(2000)
+        
         show_learning_complete_screen(screen, font, "事前訓練", ai_win_count, ai_lose_count, ai_draw_count, ai_avg_reward)
+        
     except Exception as e:
         print(f"❌ 事前訓練エラー: {e}")
         show_learning_error_screen(screen, font, str(e))
+
+def handle_mouse_click(pos):
+    """盤面クリック時の人間操作処理（黒の手番のみ）"""
+    global game, move_count, ai_learn_count, ai_total_reward, ai_avg_reward, ai_win_count, ai_lose_count, ai_draw_count, show_new_game_message, game_count
+    if current_mode != MODE_HUMAN_TRAIN or game.game_over:
+        return
+    x, y = pos
+    # 盤面内か判定
+    board_x = x - BOARD_OFFSET_X
+    board_y = y - BOARD_OFFSET_Y
+    if 0 <= board_x < BOARD_PIXEL_SIZE and 0 <= board_y < BOARD_PIXEL_SIZE:
+        row = board_y // SQUARE_SIZE
+        col = board_x // SQUARE_SIZE
+        if game.current_player == PLAYER_BLACK:
+            if game.is_valid_move(row, col, PLAYER_BLACK):
+                game.make_move(row, col, PLAYER_BLACK)
+                move_count += 1
+                game.switch_player()
+                game.check_game_over()
+            else:
+                game.last_move_error = True
+                game.error_message = "無効な手です"
+                game.error_start_time = pygame.time.get_ticks()
 
 if __name__ == "__main__":
     main_loop() 
