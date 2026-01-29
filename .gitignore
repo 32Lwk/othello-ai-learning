@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.pkl
+learning_history.json
+learning_log.json
+window_size_config.json
